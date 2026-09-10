@@ -1,0 +1,13 @@
+import {build} from 'esbuild';
+import path from 'node:path';
+import {createRequire} from 'node:module';
+import {spawn} from 'node:child_process';
+const root=path.resolve(import.meta.dirname,'..');
+await build({entryPoints:[path.join(root,'electron/runtime.ts')],bundle:true,platform:'node',format:'cjs',outfile:path.join(root,'.test-runtime/runtime.cjs')});
+const {RuntimeManager}=createRequire(import.meta.url)(path.join(root,'.test-runtime/runtime.cjs'));
+const runtime=new RuntimeManager(path.join(root,'.test-runtime/data'),path.join(root,'resources'),path.join(root,'backend'),state=>console.log(JSON.stringify(state)));
+await runtime.inspect();
+const state=await runtime.install();
+if(!state.ready)process.exit(1);
+await new Promise((resolve,reject)=>{const proc=spawn(runtime.pythonPath,['-c','import torch; x=torch.randn(1024,1024,device="cuda"); y=x@x; torch.cuda.synchronize(); print("GPU_TENSOR_OK",torch.cuda.get_device_name(),float(y.sum()))'],{windowsHide:true,stdio:'inherit'});proc.on('exit',code=>code===0?resolve():reject(new Error(`GPU check ${code}`)));});
+console.log(`TEST_PYTHON=${runtime.pythonPath}`);

@@ -1,0 +1,17 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import {build} from 'esbuild';
+import {createRequire} from 'node:module';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+const temp=await fs.mkdtemp(path.join(os.tmpdir(),'magidepth-policy-'));
+await build({entryPoints:['electron/policy.ts'],bundle:true,platform:'node',format:'cjs',outfile:path.join(temp,'policy.cjs')});
+const {safeAssetPath,sanitizeOptions,sanitizePreferences,requireLocalPath}=createRequire(import.meta.url)(path.join(temp,'policy.cjs'));
+test('defaults are useful and invalid maps never produce an empty job',()=>{assert.deepEqual(sanitizeOptions({maps:['malicious']}).maps,['depth']);assert.deepEqual(sanitizeOptions({maps:['depth','normal','depth']}).maps,['depth','normal']);});
+test('numeric and enum options are clamped',()=>{const p=sanitizeOptions({gamma:99,normalStrength:-1,contrast:NaN,inputSize:999,steps:99,model:'bad',device:'bad'});assert.equal(p.gamma,3);assert.equal(p.normalStrength,.1);assert.equal(p.contrast,.5);assert.equal(p.inputSize,392);assert.equal(p.steps,4);assert.equal(p.device,'auto');});
+test('preview maps and advanced mode supported',()=>{const p=sanitizeOptions({processingMode:'advanced',previewMap:'alpha',steps:8});assert.equal(p.processingMode,'advanced');assert.equal(p.previewMap,'alpha');assert.equal(p.steps,8);});
+test('asset traversal denied',()=>{const root=path.resolve(temp,'dist');assert.throws(()=>safeAssetPath(root,'/../secret'));assert.throws(()=>safeAssetPath(root,'/..'));assert.equal(safeAssetPath(root,'/assets/index.js'),path.join(root,'assets/index.js'));});
+test('remote relative and null-byte paths denied',()=>{for(const name of ['../video.mp4','https://example.com/video.mp4','\\\\server\\share\\x.mp4','a\0b'])assert.throws(()=>requireLocalPath(name));assert.equal(requireLocalPath(path.join(temp,'영상.mp4')),path.join(temp,'영상.mp4'));});
+test('preferences sanitize without allowing arbitrary fields',()=>{const p=sanitizePreferences({theme:'unknown',evil:'data',options:{gamma:0}});assert.equal(p.theme,'dark');assert.equal(p.options.gamma,.2);assert.equal(p.evil,undefined);});
+test('Windows alternate-stream and slash UNC paths denied',()=>{if(process.platform==='win32'){assert.throws(()=>requireLocalPath('//server/share/video.mp4'));assert.throws(()=>requireLocalPath('C:\\media\\image.png:secret'));}});

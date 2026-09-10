@@ -1,0 +1,25 @@
+import * as React from 'react';
+import * as DialogPrimitive from '@radix-ui/react-dialog';
+import * as SliderPrimitive from '@radix-ui/react-slider';
+import * as SelectPrimitive from '@radix-ui/react-select';
+import * as SwitchPrimitive from '@radix-ui/react-switch';
+import * as TooltipPrimitive from '@radix-ui/react-tooltip';
+import {Check, ChevronDown, X} from 'lucide-react';
+import {cn} from '../../lib/utils';
+
+export const Dialog = DialogPrimitive.Root;
+export const DialogTitle = DialogPrimitive.Title;
+export const DialogDescription = DialogPrimitive.Description;
+export function DialogContent({className, children, ...props}: React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>) {
+  return <DialogPrimitive.Portal><DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm data-[state=open]:animate-fade-in"/><DialogPrimitive.Content className={cn('dialog-content fixed left-1/2 top-1/2 z-50 max-h-[88vh] w-[calc(100%-2rem)] max-w-lg -translate-x-1/2 -translate-y-1/2 overflow-auto rounded-2xl border border-border bg-popover p-7 text-foreground shadow-2xl focus:outline-none', className)} {...props}>{children}<DialogPrimitive.Close className="absolute right-4 top-4 rounded-md p-1 text-muted-foreground hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring" aria-label="닫기"><X size={18}/></DialogPrimitive.Close></DialogPrimitive.Content></DialogPrimitive.Portal>;
+}
+export const Slider = React.forwardRef<React.ElementRef<typeof SliderPrimitive.Root>, React.ComponentPropsWithoutRef<typeof SliderPrimitive.Root>>(({className,...props},ref)=><SliderPrimitive.Root ref={ref} className={cn('relative flex w-full touch-none select-none items-center',className)} {...props}><SliderPrimitive.Track className="relative h-1 w-full grow overflow-hidden rounded-full bg-secondary"><SliderPrimitive.Range className="absolute h-full bg-primary"/></SliderPrimitive.Track>{(props.value ?? props.defaultValue ?? [0]).map((_,i)=><SliderPrimitive.Thumb key={i} className="block h-3 w-3 rounded-full border-2 border-primary bg-primary shadow-sm ring-offset-background transition-transform hover:scale-125 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"/>)}</SliderPrimitive.Root>);
+Slider.displayName='Slider';
+export function Select({value,onValueChange,children,label,disabled}: {value:string;onValueChange:(value:string)=>void;children:React.ReactNode;label:string;disabled?:boolean}) {
+  return <SelectPrimitive.Root value={value} onValueChange={onValueChange} disabled={disabled}><SelectPrimitive.Trigger aria-label={label} className="flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-3 text-xs outline-none focus:ring-2 focus:ring-ring disabled:opacity-40"><SelectPrimitive.Value/><SelectPrimitive.Icon><ChevronDown size={14} className="text-muted-foreground"/></SelectPrimitive.Icon></SelectPrimitive.Trigger><SelectPrimitive.Portal><SelectPrimitive.Content position="popper" sideOffset={5} className="z-[80] min-w-[var(--radix-select-trigger-width)] overflow-hidden rounded-lg border border-border bg-popover p-1 text-foreground shadow-xl"><SelectPrimitive.Viewport>{children}</SelectPrimitive.Viewport></SelectPrimitive.Content></SelectPrimitive.Portal></SelectPrimitive.Root>;
+}
+export function SelectItem({children,value}: {children:React.ReactNode;value:string}) {return <SelectPrimitive.Item value={value} className="relative flex cursor-default select-none items-center rounded-md py-2 pl-3 pr-8 text-xs outline-none data-[highlighted]:bg-accent"><SelectPrimitive.ItemText>{children}</SelectPrimitive.ItemText><SelectPrimitive.ItemIndicator className="absolute right-2"><Check size={13}/></SelectPrimitive.ItemIndicator></SelectPrimitive.Item>;}
+export const Switch = React.forwardRef<React.ElementRef<typeof SwitchPrimitive.Root>,React.ComponentPropsWithoutRef<typeof SwitchPrimitive.Root>>(({className,...props},ref)=><SwitchPrimitive.Root ref={ref} className={cn('peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors data-[state=checked]:bg-primary data-[state=unchecked]:bg-secondary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-40',className)} {...props}><SwitchPrimitive.Thumb className="pointer-events-none block h-4 w-4 rounded-full bg-background shadow-sm transition-transform data-[state=checked]:translate-x-4 data-[state=unchecked]:translate-x-0"/></SwitchPrimitive.Root>);
+Switch.displayName='Switch';
+export const TooltipProvider=TooltipPrimitive.Provider;
+export function Tooltip({label,children}: {label:string;children:React.ReactNode}) {return <TooltipPrimitive.Root><TooltipPrimitive.Trigger asChild>{children}</TooltipPrimitive.Trigger><TooltipPrimitive.Portal><TooltipPrimitive.Content sideOffset={6} className="z-[100] max-w-[260px] rounded-md border border-border bg-popover px-3 py-2 text-xs text-foreground shadow-lg">{label}</TooltipPrimitive.Content></TooltipPrimitive.Portal></TooltipPrimitive.Root>;}

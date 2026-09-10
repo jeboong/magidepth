@@ -1,0 +1,15 @@
+# torch==2.7.1 and torchvision==0.22.1 are provisioned separately from the
+# official PyTorch CUDA 12.8 wheel index by the desktop runtime installer.
+numpy==2.2.6
+opencv-python-headless==4.11.0.86
+transformers==4.50.3
+huggingface-hub==0.30.2
+safetensors==0.5.3
+easydict==1.13
+einops==0.8.1
+tqdm==4.67.1
+Pillow==11.2.1
+diffusers==0.33.1
+accelerate==1.6.0
+timm==1.0.15
+kornia==0.8.1

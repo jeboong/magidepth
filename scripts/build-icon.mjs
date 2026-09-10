@@ -1,0 +1,15 @@
+import sharp from 'sharp';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+const root=path.resolve(import.meta.dirname,'..');
+const source=path.join(root,'public','brand','magidepth.png');
+const metadata=await sharp(source).metadata();
+if(!metadata.hasAlpha)throw new Error('Brand icon must preserve transparency');
+const sizes=[16,24,32,48,64,128,256];
+const images=await Promise.all(sizes.map(size=>sharp(source).resize(size,size,{fit:'contain',background:{r:0,g:0,b:0,alpha:0}}).png().toBuffer()));
+const header=Buffer.alloc(6+16*sizes.length);header.writeUInt16LE(1,2);header.writeUInt16LE(sizes.length,4);
+let offset=header.length;
+images.forEach((image,index)=>{const pos=6+16*index;header[pos]=sizes[index]===256?0:sizes[index];header[pos+1]=header[pos];header.writeUInt16LE(1,pos+4);header.writeUInt16LE(32,pos+6);header.writeUInt32LE(image.length,pos+8);header.writeUInt32LE(offset,pos+12);offset+=image.length;});
+await fs.mkdir(path.join(root,'build'),{recursive:true});
+await fs.writeFile(path.join(root,'build','icon.ico'),Buffer.concat([header,...images]));
+console.log('MagiDepth transparent multi-resolution Windows icon ready:',sizes.join(', '));
