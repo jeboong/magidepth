@@ -12,6 +12,7 @@
     "url": "https://github.com/jeboong/magidepth.git"
   },
   "scripts": {
+    "postinstall": "node node_modules/electron/install.js",
     "dev": "vite --host 127.0.0.1",
     "desktop:build": "node scripts/build-desktop.mjs",
     "desktop:dev": "npm run desktop:build && electron .",

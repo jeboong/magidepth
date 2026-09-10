@@ -17,7 +17,7 @@ Windows x64: **MagiDepth-Setup-0.1.0.exe**
 
 ## 검증과 주의
 
-RTX 5070 Ti에서 두 Depth 모델, 고급 8종 PNG 및 짧은 MP4, HEVC, 트림, 취소를 실제 검증했습니다. 별도로 격리 Python 런타임과 Electron IPC·클립보드·설정·소스 출력 통합 테스트를 수행했습니다. [실측 조건](https://github.com/jeboong/magidepth/blob/codex/initial-release/backend/BENCHMARKS.md)
+RTX 5070 Ti에서 두 Depth 모델, 고급 8종 PNG 및 짧은 MP4, HEVC, 트림, 취소를 실제 검증했습니다. 별도로 격리 Python 런타임과 Electron IPC·클립보드·설정·소스 출력 통합 테스트를 수행했습니다. NSIS 설치가 정상 완료되었고, 실제 설치된 ASAR와 리소스에서도 10개 통합 검사를 통과했습니다. [실측 조건](https://github.com/jeboong/magidepth/blob/codex/initial-release/backend/BENCHMARKS.md)
 
 미서명 공개 베타입니다. SmartScreen 경고가 있을 수 있으므로 출처·SHA-256 및 회사 설치 정책을 확인하세요. 보안 기능을 끄지 마세요.
 

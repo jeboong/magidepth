@@ -1,5 +1,7 @@
 /* Hidden, application-owned Electron integration smoke test.
  * Requires `npm run build` and the provisioned .test-runtime/data engine.
+ * Optional: MAGIDEPTH_PACKAGED_DIR points to win-unpacked or an installed app
+ * directory. The harness then loads the actual app.asar and packaged resources.
  * No real file dialogs, Explorer windows, personal media, or model inference are used.
  */
 const path = require('node:path');
@@ -10,6 +12,7 @@ const crypto = require('node:crypto');
 const {spawn, spawnSync} = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const data = process.env.DEPTHDESK_TEST_USER_DATA || path.join(root, '.test-runtime', 'data');
+const packagedDir=process.env.MAGIDEPTH_PACKAGED_DIR?path.resolve(process.env.MAGIDEPTH_PACKAGED_DIR):null;
 
 if (!process.versions.electron) {
   const env = {...process.env, DEPTHDESK_TEST_USER_DATA:data};
@@ -28,6 +31,9 @@ async function run() {
   const fixtureDir=path.join(data,'integration-fixtures',new Date().toISOString().replace(/[:.]/g,'-'));
   const outputDir=path.join(fixtureDir,'output');
   const tests=[];
+  const appRoot=packagedDir?path.join(packagedDir,'resources','app.asar'):root;
+  const resourceRoot=packagedDir?path.join(packagedDir,'resources'):null;
+  let packageVersion;
   let win;
   let originalPrefs;
   let prefsExisted=false;
@@ -47,9 +53,23 @@ async function run() {
     // Do not yield before loading the main module: privileged schemes must register before app.ready.
     fsSync.mkdirSync(outputDir,{recursive:true});
     try{originalPrefs=fsSync.readFileSync(prefsPath);prefsExisted=true;}catch(error){if(error.code!=='ENOENT')throw error;}
-    // Only the app-path lookup is redirected; the production main/preload/IPC run unchanged.
-    app.getAppPath=()=>root;
-    assert.equal(app.getAppPath(),root);
+    // The test Electron host supplies application metadata normally supplied by
+    // its packaged bootstrap. All main/preload/IPC/backend code remains unchanged.
+    app.getAppPath=()=>appRoot;
+    assert.equal(app.getAppPath(),appRoot);
+    if(packagedDir){
+      assert.ok(fsSync.existsSync(path.join(packagedDir,'MagiDepth.exe')),'Packaged MagiDepth.exe is missing');
+      const metadata=JSON.parse(fsSync.readFileSync(path.join(appRoot,'package.json'),'utf8'));
+      const expected=JSON.parse(fsSync.readFileSync(path.join(root,'package.json'),'utf8'));
+      assert.equal(metadata.name,'magidepth');assert.equal(metadata.version,expected.version);packageVersion=metadata.version;
+      Object.defineProperty(app,'isPackaged',{value:true,configurable:true});
+      Object.defineProperty(process,'resourcesPath',{value:resourceRoot,configurable:true});
+      app.getVersion=()=>metadata.version;
+      app.setPath('userData',data);
+      // Network update checks are explicitly disabled for this offline harness.
+      const initialPrefs=prefsExisted?JSON.parse(originalPrefs.toString('utf8')):{};
+      fsSync.writeFileSync(prefsPath,JSON.stringify({...initialPrefs,autoUpdate:false,tutorialDone:true}));
+    }
     process.env.DEPTHDESK_TEST_USER_DATA=data;
     delete process.env.DEPTHDESK_DEV_URL;
     dialog.showOpenDialog=async(_window,options)=>{dialogCalls.push({kind:'open',properties:options.properties});const answer=openResponses.shift();assert.ok(answer,'Unexpected open dialog');return answer;};
@@ -68,9 +88,16 @@ async function run() {
         window.webContents.once('did-fail-load',(_e,code,description)=>reject(new Error(`Renderer load failed: ${code} ${description}`)));
       });
     });
-    require(path.join(root,'app-desktop','main.cjs'));
+    require(path.join(appRoot,'app-desktop','main.cjs'));
     await loaded;
     if(failure)throw failure;
+    if(packagedDir)await check('packaged ASAR, version, backend, runtime assets and license resources',async()=>{
+      assert.equal(app.isPackaged,true);assert.equal(app.getVersion(),packageVersion);assert.equal(app.getPath('userData'),data);
+      for(const relative of ['backend/daemon.py','backend/engine.py','backend/exporter.py','backend/requirements.txt','runtime-assets/manifest.json','runtime-assets/python-embed.zip','runtime-assets/pip.whl','licenses/MagiDepth-LICENSE.txt','licenses/THIRD_PARTY_NOTICES.md','app-update.yml'])assert.ok((await fs.stat(path.join(resourceRoot,relative))).size>0,`Missing packaged resource ${relative}`);
+      for(const relative of ['app-desktop/main.cjs','app-desktop/preload.cjs','dist/index.html','dist/brand/magidepth.png'])assert.ok((await fs.stat(path.join(appRoot,relative))).size>0,`Missing ASAR asset ${relative}`);
+      const updater=await fs.readFile(path.join(resourceRoot,'app-update.yml'),'utf8');assert.match(updater,/provider:\s*github/);assert.match(updater,/repo:\s*magidepth/);
+      console.log(`INFO Packaged MagiDepth v${packageVersion}; loading real ASAR and external resource paths.`);
+    });
     await check('production preload API and renderer isolation',async()=>{
       assert.equal(win.isVisible(),false);
       assert.equal(win.webContents.getURL(),'depthdesk://app/index.html');
@@ -83,6 +110,7 @@ async function run() {
       const runtime=await api('getRuntime');assert.equal(runtime.ready,true, runtime.message);
       const system=await api('getSystem');assert.equal(system.ffmpeg,true);assert.ok(system.python);assert.ok(system.torch);
       assert.equal(typeof system.cuda,'boolean');
+      if(packagedDir)assert.equal(system.appVersion,packageVersion);
       console.log(`INFO Electron ${process.versions.electron}; Python ${system.python}; PyTorch ${system.torch}; CUDA available ${system.cuda}`);
     });
     const ffmpeg=path.join(data,'tools','bin','ffmpeg.exe');
@@ -167,12 +195,13 @@ async function run() {
         const pasted=await api('pasteClipboardImage');assert.ok(pasted?.endsWith('.png'));const info=await api('probeVideo',pasted);assert.equal(info.kind,'image');assert.equal(info.width,96);assert.equal(info.height,64);
       }finally{if(clipboardBackup.length)await clipboard.write(clipboardBackup);else clipboard.clear();clipboardChanged=false;}
     });
-    await check('development update event through preload subscription',async()=>{
+    if(!packagedDir)await check('development update event through preload subscription',async()=>{
       await renderer(()=>{window.__testUpdate=null;window.__testUnsubscribe=window.depthdesk.onUpdate(value=>{window.__testUpdate=value;});});
       await api('checkForUpdates');const update=await renderer(()=>{window.__testUnsubscribe();return window.__testUpdate;});assert.equal(update.status,'up-to-date');
     });
-    console.log(`PASS ALL ${tests.length} Electron integration checks. No AI models loaded; all fixture media is synthetic.`);
-    await fs.writeFile(path.join(fixtureDir,'integration-report.json'),JSON.stringify({ok:true,electron:process.versions.electron,tests},null,2));
+    else console.log('SKIP packaged network update check (offline integration; no installation/update is triggered).');
+    console.log(`PASS ALL ${tests.length} ${packagedDir?'packaged-resource ':''}Electron integration checks. No AI models loaded; all fixture media is synthetic.`);
+    await fs.writeFile(path.join(fixtureDir,'integration-report.json'),JSON.stringify({ok:true,mode:packagedDir?'packaged-resources':'development',version:packageVersion,electron:process.versions.electron,tests},null,2));
   } catch(error){failure=error;console.error('FAIL Electron integration:',error.stack||error.message);}
   finally{
     clearTimeout(fatalTimer);
