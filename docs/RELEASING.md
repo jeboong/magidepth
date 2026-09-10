@@ -9,3 +9,13 @@
 The CI workflow builds after offline tests pass. Tag publishing requires contents write permission. Signing needs a real owner-provided certificate; never commit keys or call an unsigned build signed.
 
 The updater is implemented with download and install UI. Initial release validation can verify the no-update feed; a completed historical upgrade cycle requires a later version. Do not claim that stronger test before actually performing it.
+
+To validate the real published feed against an installed release without downloading or installing an update:
+
+```powershell
+$env:MAGIDEPTH_PACKAGED_DIR = "$env:LOCALAPPDATA/Programs/magidepth"
+$env:MAGIDEPTH_TEST_UPDATE_FEED = '1'
+node scripts/test-electron.cjs
+```
+
+This requires the separately provisioned `.test-runtime/data` engine used by the integration harness. The published version must match the installed version. The offline test remains the default. CI keeps already-published release assets unchanged.

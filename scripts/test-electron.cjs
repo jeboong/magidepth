@@ -2,6 +2,8 @@
  * Requires `npm run build` and the provisioned .test-runtime/data engine.
  * Optional: MAGIDEPTH_PACKAGED_DIR points to win-unpacked or an installed app
  * directory. The harness then loads the actual app.asar and packaged resources.
+ * Network is off by default. MAGIDEPTH_TEST_UPDATE_FEED=1 additionally checks the
+ * published packaged feed, with downloading and installation explicitly disabled.
  * No real file dialogs, Explorer windows, personal media, or model inference are used.
  */
 const path = require('node:path');
@@ -13,6 +15,8 @@ const {spawn, spawnSync} = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const data = process.env.DEPTHDESK_TEST_USER_DATA || path.join(root, '.test-runtime', 'data');
 const packagedDir=process.env.MAGIDEPTH_PACKAGED_DIR?path.resolve(process.env.MAGIDEPTH_PACKAGED_DIR):null;
+const testPublishedFeed=process.env.MAGIDEPTH_TEST_UPDATE_FEED==='1';
+if(testPublishedFeed&&!packagedDir){console.error('MAGIDEPTH_TEST_UPDATE_FEED requires MAGIDEPTH_PACKAGED_DIR.');process.exit(1);}
 
 if (!process.versions.electron) {
   const env = {...process.env, DEPTHDESK_TEST_USER_DATA:data};
@@ -199,9 +203,41 @@ async function run() {
       await renderer(()=>{window.__testUpdate=null;window.__testUnsubscribe=window.depthdesk.onUpdate(value=>{window.__testUpdate=value;});});
       await api('checkForUpdates');const update=await renderer(()=>{window.__testUnsubscribe();return window.__testUpdate;});assert.equal(update.status,'up-to-date');
     });
+    else if(testPublishedFeed)await check('published update feed matches installed version without downloading',async()=>{
+      // Resolve the same updater instance used by this packaged main module.
+      const {createRequire}=require('node:module');
+      const packagedRequire=createRequire(path.join(appRoot,'app-desktop','main.cjs'));
+      const {autoUpdater}=packagedRequire('electron-updater');
+      autoUpdater.autoDownload=false;
+      autoUpdater.autoInstallOnAppQuit=false;
+      autoUpdater.allowPrerelease=false;
+      autoUpdater.allowDowngrade=false;
+      assert.equal(autoUpdater.autoDownload,false);
+      assert.equal(autoUpdater.autoInstallOnAppQuit,false);
+      await renderer(()=>{
+        window.__testPublishedFeed=new Promise(resolve=>{
+          window.__testFeedUnsubscribe=window.depthdesk.onUpdate(value=>{
+            if(['up-to-date','available','ready','error'].includes(value.status))resolve(value);
+          });
+        });
+      });
+      let timer;
+      try{
+        const terminal=await Promise.race([
+          Promise.all([api('checkForUpdates'),renderer(()=>window.__testPublishedFeed)]).then(([,status])=>status),
+          new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Published update feed did not return within 45 seconds.')),45000);}),
+        ]);
+        // A newer release is a test failure, not permission to download it.
+        assert.equal(terminal.status,'up-to-date',`Expected current published version; received ${terminal.status}${terminal.version?` v${terminal.version}`:''}${terminal.message?`: ${terminal.message}`:''}`);
+        assert.equal(terminal.version,packageVersion,'Published feed version must match the tested package.');
+        assert.equal(autoUpdater.autoDownload,false);
+        assert.equal(autoUpdater.autoInstallOnAppQuit,false);
+        console.log(`INFO Published feed reports MagiDepth v${terminal.version} up to date; no update download or installation requested.`);
+      }finally{clearTimeout(timer);await renderer(()=>{window.__testFeedUnsubscribe?.();});}
+    });
     else console.log('SKIP packaged network update check (offline integration; no installation/update is triggered).');
     console.log(`PASS ALL ${tests.length} ${packagedDir?'packaged-resource ':''}Electron integration checks. No AI models loaded; all fixture media is synthetic.`);
-    await fs.writeFile(path.join(fixtureDir,'integration-report.json'),JSON.stringify({ok:true,mode:packagedDir?'packaged-resources':'development',version:packageVersion,electron:process.versions.electron,tests},null,2));
+    await fs.writeFile(path.join(fixtureDir,'integration-report.json'),JSON.stringify({ok:true,mode:packagedDir?'packaged-resources':'development',publishedFeedChecked:testPublishedFeed,version:packageVersion,electron:process.versions.electron,tests},null,2));
   } catch(error){failure=error;console.error('FAIL Electron integration:',error.stack||error.message);}
   finally{
     clearTimeout(fatalTimer);

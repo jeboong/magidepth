@@ -47,4 +47,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
+          gh release view $env:GITHUB_REF_NAME --json tagName *> $null
+          if ($LASTEXITCODE -eq 0) {
+            Write-Output "Release already published; keeping the existing tested assets unchanged."
+            exit 0
+          }
           gh release create $env:GITHUB_REF_NAME release/*.exe release/*.blockmap release/latest.yml release/SHA256SUMS.txt --title "MagiDepth $env:GITHUB_REF_NAME" --generate-notes
