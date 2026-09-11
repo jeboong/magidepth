@@ -142,8 +142,10 @@ class CloakTests(unittest.TestCase):
             decoded = cv2.imdecode(np.fromfile(output, np.uint8), cv2.IMREAD_UNCHANGED)
             np.testing.assert_array_equal(decoded[..., 3], rgba[..., 3])
             self.assertEqual(result["frames"], 1)
-            self.assertEqual(result["outputs"], [str(output)])
-            self.assertTrue(any(e.get("outputPath") == str(output) for e in events))
+            # Windows can report the same temp file with either 8.3 or long names.
+            self.assertEqual(len(result["outputs"]), 1)
+            self.assertTrue(Path(result["outputs"][0]).samefile(output))
+            self.assertTrue(any(e.get("outputPath") and Path(e["outputPath"]).samefile(output) for e in events))
             self.assertFalse(list(root.glob(".magicloak-*")))
 
     def test_preview_and_probe_contract(self):
