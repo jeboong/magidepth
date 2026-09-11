@@ -1,10 +1,10 @@
 {
   "name": "magidepth",
-  "version": "0.1.0",
-  "description": "A quiet workspace for fast, local AI depth video.",
+  "version": "0.2.0",
+  "description": "MagiMagic — local depth maps and face-grid magic in one workspace.",
   "private": true,
   "main": "app-desktop/main.cjs",
-  "author": "MagiDepth contributors",
+  "author": "MagiMagic contributors",
   "license": "MIT",
   "homepage": "https://github.com/jeboong/magidepth",
   "repository": {
@@ -60,7 +60,7 @@
   "build": {
     "electronDist": "node_modules/electron/dist",
     "appId": "com.magidepth.app",
-    "productName": "MagiDepth",
+    "productName": "MagiMagic",
     "directories": {
       "output": "release",
       "buildResources": "build"
@@ -109,7 +109,7 @@
         }
       ],
       "icon": "build/icon.ico",
-      "artifactName": "MagiDepth-Setup-${version}.${ext}"
+      "artifactName": "MagiMagic-Setup-${version}.${ext}"
     },
     "nsis": {
       "oneClick": true,
@@ -117,7 +117,7 @@
       "allowElevation": false,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "MagiDepth",
+      "shortcutName": "MagiMagic",
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false
     },

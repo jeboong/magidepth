@@ -66,6 +66,7 @@ import {
   TooltipProvider,
 } from "./components/ui/primitives";
 import { Tutorial } from "./components/Tutorial";
+import { CloakWorkspace } from "./cloak/CloakWorkspace";
 
 type ViewMode = "compare" | "source" | "depth";
 const initialRuntime: RuntimeStatus = {
@@ -161,6 +162,9 @@ function RangeSetting({
 }
 
 export default function App() {
+  const [workspace, setWorkspace] = useState<"depth" | "cloak">("depth");
+  const [cloakBusy, setCloakBusy] = useState(false);
+  const [cloakTutorial, setCloakTutorial] = useState(false);
   const [prefs, setPrefs] = useState<Preferences>(defaultPreferences);
   const [loaded, setLoaded] = useState(false);
   const [video, setVideo] = useState<VideoInfo | null>(null);
@@ -195,18 +199,25 @@ export default function App() {
   const activeJob = useRef<string | null>(null);
   const options = prefs.options;
   const busy = !!job;
-  const canRender = !!video && runtime.ready && !busy && !isBrowserDemo;
+  const canRender =
+    !!video && runtime.ready && !busy && !cloakBusy && !isBrowserDemo;
   const isImage = video?.kind === "image";
 
   useEffect(() => {
     let alive = true;
-    let systemRequested = false;
-    const loadSystem = () => {
-      if (systemRequested || !alive) return;
-      systemRequested = true;
+    let systemReadinessKey = "";
+    const loadSystem = (status: RuntimeStatus) => {
+      const key = `${status.ready}:${!!status.cloakReady}`;
+      if (systemReadinessKey === key || !alive) return;
+      systemReadinessKey = key;
       // getSystem itself inspects the engine and emits runtime status. Do not turn
       // that readiness event into a recursive getSystem IPC loop.
-      api.getSystem().then(value => { if (alive) setSystem(value); }).catch(() => {});
+      api
+        .getSystem()
+        .then((value) => {
+          if (alive) setSystem(value);
+        })
+        .catch(() => {});
     };
     Promise.all([api.getPreferences(), api.getRuntime()])
       .then(([p, r]) => {
@@ -214,7 +225,7 @@ export default function App() {
         setPrefs(p);
         setRuntime(r);
         setLoaded(true);
-        if (r.ready) loadSystem();
+        if (r.ready || r.cloakReady) loadSystem(r);
         if (!p.tutorialDone && !isBrowserDemo) setTutorial(true);
       })
       .catch((e) => {
@@ -223,8 +234,8 @@ export default function App() {
       });
     const offRuntime = api.onRuntime((r) => {
       setRuntime(r);
-      if (r.ready) loadSystem();
-      else systemRequested = false;
+      if (r.ready || r.cloakReady) loadSystem(r);
+      else systemReadinessKey = "";
     });
     const offProgress = api.onProgress((p) => {
       if (p.jobId === activeJob.current) setProgress(p);
@@ -317,6 +328,7 @@ export default function App() {
   );
   useEffect(() => {
     const paste = (e: KeyboardEvent) => {
+      if (workspace !== "depth") return;
       if (!(e.ctrlKey && e.key.toLowerCase() === "v")) return;
       const target = e.target as HTMLElement;
       if (
@@ -343,9 +355,10 @@ export default function App() {
     };
     window.addEventListener("keydown", paste);
     return () => window.removeEventListener("keydown", paste);
-  }, [openVideo]);
+  }, [openVideo, workspace]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
+      if (workspace !== "depth") return;
       const target = e.target as HTMLElement;
       if (
         ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) ||
@@ -377,7 +390,10 @@ export default function App() {
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [video, step, openVideo, settings, tutorial]);
+  }, [video, step, openVideo, settings, tutorial, workspace]);
+  useEffect(() => {
+    if (workspace !== "depth") player.current?.pause();
+  }, [workspace]);
   const chooseDir = async () => {
     try {
       const dir = await api.chooseOutputDir();
@@ -411,7 +427,7 @@ export default function App() {
     }
   };
   const runPreview = async () => {
-    if (!video || !runtime.ready || busy) return;
+    if (!video || !runtime.ready || busy || cloakBusy) return;
     const id = crypto.randomUUID();
     activeJob.current = id;
     setJob({ id, kind: "preview" });
@@ -548,14 +564,17 @@ export default function App() {
       <div
         className="app-shell"
         onDragOver={(e) => {
+          if (workspace !== "depth") return;
           e.preventDefault();
           if (e.dataTransfer.types.includes("Files")) setDragging(true);
         }}
         onDragLeave={(e) => {
+          if (workspace !== "depth") return;
           if (!e.currentTarget.contains(e.relatedTarget as Node))
             setDragging(false);
         }}
         onDrop={(e) => {
+          if (workspace !== "depth") return;
           e.preventDefault();
           setDragging(false);
           const file = e.dataTransfer.files[0];
@@ -567,7 +586,7 @@ export default function App() {
             href="#"
             className="brand"
             onClick={(e) => e.preventDefault()}
-            aria-label="MagiDepth 매지댑스 홈"
+            aria-label="MagiMagic 매지매직 홈"
           >
             <span className="brand-icon">
               <Layers3 size={23} strokeWidth={1.6} />
@@ -580,10 +599,32 @@ export default function App() {
               />
             </span>
             <span>
-              Magi<span className="brand-light">Depth</span>
+              Magi<span className="brand-light">Magic</span>
             </span>
             <span className="brand-tag">STUDIO</span>
           </a>
+          <nav
+            className="workspace-tabs"
+            role="tablist"
+            aria-label="마법 작업실 선택"
+          >
+            <button
+              role="tab"
+              aria-selected={workspace === "depth"}
+              onClick={() => setWorkspace("depth")}
+            >
+              <Layers3 size={15} />
+              MagiDepth{busy && <span className="workspace-busy-dot" />}
+            </button>
+            <button
+              role="tab"
+              aria-selected={workspace === "cloak"}
+              onClick={() => setWorkspace("cloak")}
+            >
+              <ShieldCheck size={15} />
+              MagiCloak{cloakBusy && <span className="workspace-busy-dot" />}
+            </button>
+          </nav>
           <div className="header-right">
             <span className="local-badge">
               <span />
@@ -594,7 +635,11 @@ export default function App() {
               <Button
                 variant="ghost"
                 size="icon"
-                onClick={() => setTutorial(true)}
+                onClick={() =>
+                  workspace === "depth"
+                    ? setTutorial(true)
+                    : setCloakTutorial(true)
+                }
                 aria-label="튜토리얼 열기"
               >
                 <BookOpen />
@@ -632,14 +677,15 @@ export default function App() {
             </Tooltip>
           </div>
         </header>
-        <main className="workspace">
+        <main
+          className="workspace"
+          style={{ display: workspace === "depth" ? undefined : "none" }}
+        >
           <section className="editor-column">
             <div className="workspace-heading">
               <div>
                 <div className="eyebrow">IMAGE & VIDEO TO MAPS</div>
-                <h1>
-                  새로운 차원을 발견하세요<span>.</span>
-                </h1>
+                <h1>MagiDepth</h1>
                 <p>이미지와 영상, 그 안에 숨은 깊이와 표면을 꺼내다.</p>
               </div>
               <Button
@@ -797,7 +843,7 @@ export default function App() {
                       <div className="sculpture-cross cross-2" />
                       <div className="sculpture-orbit" />
                     </div>
-                    <h2>한 장면, 더 깊은 가능성.</h2>
+                    <h2>매지코의 마법을 느껴보세요</h2>
                     <p>이미지나 영상을 드래그해 시작하세요.</p>
                     <Button onClick={() => void openVideo()} disabled={opening}>
                       <Upload size={15} />
@@ -1687,11 +1733,24 @@ export default function App() {
             </div>
           </aside>
         </main>
+        <CloakWorkspace
+          active={workspace === "cloak"}
+          runtime={runtime}
+          prefs={prefs}
+          savePreferences={savePrefs}
+          externalBusy={busy}
+          onBusyChange={setCloakBusy}
+          tutorialOpen={cloakTutorial}
+          onTutorialClose={() => setCloakTutorial(false)}
+          onTutorialOpen={() => setCloakTutorial(true)}
+          onOpenSettings={() => setSettings(true)}
+        />
         <footer className="status-bar">
           <div
             className={cn(
               "runtime-status",
-              runtime.ready && "ready",
+              (workspace === "cloak" ? runtime.cloakReady : runtime.ready) &&
+                "ready",
               runtime.error && "failed",
             )}
           >
@@ -1699,9 +1758,15 @@ export default function App() {
             {runtime.installing ? (
               <>
                 <LoaderCircle size={11} className="animate-spin" />
-                AI 환경 설치 중 · {runtimePercent}%
+                실행 환경 설치 중 · {runtimePercent}%
               </>
-            ) : runtime.ready ? (
+            ) : workspace === "cloak" && runtime.cloakReady ? (
+              <>
+                <ShieldCheck size={11} />
+                MagiCloak 준비 완료{" "}
+                <span className="status-dim">로컬 CPU 처리</span>
+              </>
+            ) : runtime.ready && workspace === "depth" ? (
               <>
                 {system?.cuda ? system.gpu : "AI 환경 준비 완료"}
                 {system?.cuda && system.vramGB > 0 && (
@@ -1720,7 +1785,15 @@ export default function App() {
                       : runtime.message}
                 </span>
                 {loaded && !isBrowserDemo && (
-                  <button onClick={() => void install()}>
+                  <button
+                    onClick={() =>
+                      workspace === "cloak"
+                        ? void api
+                            .installRuntime("cloak")
+                            .catch((e) => setError(errorMessage(e)))
+                        : void install()
+                    }
+                  >
                     {runtime.error ? "다시 시도" : "환경 설치"}
                     <ArrowRight size={11} />
                   </button>
@@ -1735,7 +1808,7 @@ export default function App() {
               </span>
             )}
             <span>
-              MagiDepth {system?.appVersion ? `v${system.appVersion}` : ""}
+              MagiMagic {system?.appVersion ? `v${system.appVersion}` : ""}
             </span>
             <button
               onClick={() => setSettings(true)}
@@ -1853,8 +1926,12 @@ export default function App() {
               </div>
             </div>
             <div className="settings-modal-section">
-              <h3>AI 실행 환경</h3>
+              <h3>실행 환경</h3>
               <div className="system-info">
+                <span>MagiDepth</span>
+                <strong>{runtime.ready ? "준비 완료" : "미설치"}</strong>
+                <span>MagiCloak</span>
+                <strong>{runtime.cloakReady ? "준비 완료" : "미설치"}</strong>
                 <span>그래픽 장치</span>
                 <strong>{system?.gpu ?? "확인 중"}</strong>
                 <span>PyTorch</span>
@@ -1866,6 +1943,22 @@ export default function App() {
               </div>
               {runtime.error && (
                 <p className="text-destructive">{runtime.error}</p>
+              )}
+              {!runtime.cloakReady && (
+                <Button
+                  className="mt-3"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    void api
+                      .installRuntime("cloak")
+                      .catch((e) => setError(errorMessage(e)))
+                  }
+                  disabled={runtime.installing || isBrowserDemo}
+                >
+                  <Download />
+                  MagiCloak 도구 준비
+                </Button>
               )}
               {!runtime.ready && (
                 <>
@@ -1880,11 +1973,50 @@ export default function App() {
                     <Download />
                     {runtime.installing
                       ? `설치 중 ${runtimePercent}%`
-                      : "AI 환경 설치 / 다시 시도"}
+                      : "MagiDepth AI 환경 설치 / 다시 시도"}
                   </Button>
                 </>
               )}
             </div>
+            {(runtime.mediaTools || system?.mediaTools) && (
+              <div className="settings-modal-section">
+                <h3>영상 도구 · FFmpeg / FFprobe</h3>
+                <div className="system-info">
+                  <span>탐색 출처</span>
+                  <strong>
+                    {
+                      {
+                        environment: "환경 변수",
+                        path: "시스템 PATH",
+                        cache: "로컬 캐시",
+                        download: "앱 다운로드",
+                      }[(runtime.mediaTools ?? system!.mediaTools!).source]
+                    }
+                  </strong>
+                  <span>FFmpeg 버전</span>
+                  <strong>
+                    {(runtime.mediaTools ?? system!.mediaTools!).version}
+                  </strong>
+                  <span>FFprobe 버전</span>
+                  <strong>
+                    {(runtime.mediaTools ?? system!.mediaTools!).probeVersion}
+                  </strong>
+                </div>
+                <p className="break-all">
+                  <strong>FFmpeg</strong>
+                  <br />
+                  {(runtime.mediaTools ?? system!.mediaTools!).ffmpeg}
+                </p>
+                <p className="break-all">
+                  <strong>FFprobe</strong>
+                  <br />
+                  {(runtime.mediaTools ?? system!.mediaTools!).ffprobe}
+                </p>
+                {(runtime.mediaTools ?? system!.mediaTools!).reason && (
+                  <p>{(runtime.mediaTools ?? system!.mediaTools!).reason}</p>
+                )}
+              </div>
+            )}
             <div className="settings-modal-section">
               <h3>도움말</h3>
               <Button
@@ -1892,15 +2024,17 @@ export default function App() {
                 className="mt-3"
                 onClick={() => {
                   setSettings(false);
-                  setTutorial(true);
+                  workspace === "cloak"
+                    ? setCloakTutorial(true)
+                    : setTutorial(true);
                 }}
               >
                 <BookOpen />
                 빠른 시작 가이드 다시 보기
               </Button>
               <p className="mt-3">
-                AI가 추정한 상대 깊이입니다. 정확한 물리 거리 측정 용도가
-                아닙니다.
+                MagiDepth의 맵은 AI 추정값입니다. MagiCloak은 격자·이미지 변형
+                도구이며 얼굴 검출, 인식 차단, 익명화를 보장하지 않습니다.
               </p>
             </div>
           </DialogContent>

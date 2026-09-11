@@ -29,4 +29,4 @@ const pip=await download(pipFile.url,path.join(resources,'pip.whl'),pipFile.dige
 const manifest={schema:1,python:{version:pythonVersion,url:pythonUrl,sha256:crypto.createHash('sha256').update(python).digest('hex')},pip:{version:'25.3',url:pipFile.url,sha256:crypto.createHash('sha256').update(pip).digest('hex')},torch:'2.7.1',torchvision:'0.22.1',cuda:'cu128',ffmpeg:{version:'8.1.2',url:'https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.1.2-essentials_build.zip',sha256:'db580001caa24ac104c8cb856cd113a87b0a443f7bdf47d8c12b1d740584a2ec'}};
 if(!lock) await fs.writeFile(lockPath,JSON.stringify(manifest,null,2)+'\n');
 await fs.writeFile(path.join(resources,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');
-console.log('Runtime resources ready. Python and pip verified; matching FFmpeg tools download from upstream on first run.');
+console.log('Runtime resources ready. Python and pip verified; installed FFmpeg tools are checked first, with verified download only when needed.');

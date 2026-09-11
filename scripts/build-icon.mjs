@@ -12,4 +12,4 @@ let offset=header.length;
 images.forEach((image,index)=>{const pos=6+16*index;header[pos]=sizes[index]===256?0:sizes[index];header[pos+1]=header[pos];header.writeUInt16LE(1,pos+4);header.writeUInt16LE(32,pos+6);header.writeUInt32LE(image.length,pos+8);header.writeUInt32LE(offset,pos+12);offset+=image.length;});
 await fs.mkdir(path.join(root,'build'),{recursive:true});
 await fs.writeFile(path.join(root,'build','icon.ico'),Buffer.concat([header,...images]));
-console.log('MagiDepth transparent multi-resolution Windows icon ready:',sizes.join(', '));
+console.log('MagiMagic transparent multi-resolution Windows icon ready:',sizes.join(', '));

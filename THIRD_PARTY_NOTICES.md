@@ -1,6 +1,12 @@
 # Third-party notices
 
-MagiDepth application code is MIT licensed. Third-party components retain their own licenses. No model weights or FFmpeg executables are redistributed inside the installer.
+Original MagiMagic application code is MIT licensed. Third-party and owner-supplied ported components retain their own rights and conditions. No model weights or FFmpeg executables are redistributed inside the installer.
+
+## Owner-requested MagiCloak port
+
+`backend/cloak` derives from https://github.com/jeboong/seedance-cloak at commit `6f0e670f056c5ede87c0b0c390613ed6c499a455`, integrated at the repository owner's request. Upstream did not publish a LICENSE file at that revision. Do not infer an MIT grant for this copied code merely from this application's top-level license. Provenance and adaptations are documented in `docs/CLOAK_PROVENANCE.md`, with parity checks in `docs/CLOAK_VERIFICATION.md`.
+
+YuNet's ONNX model is downloaded separately from a pinned OpenCV Zoo revision with a SHA-256 check; its MIT model license is retained at `backend/cloak/YuNet-LICENSE.txt`. No face images or biometric templates are uploaded or stored by the detector.
 
 ## Desktop application
 
@@ -17,7 +23,7 @@ The installer does not include NVIDIA CUDA wheels. These are downloaded from htt
 
 ## FFmpeg (downloaded separately)
 
-The runtime downloads the matching FFmpeg / ffprobe 8.1.2 essentials archive directly from Gyan's published upstream distribution, checks its pinned SHA-256, and retains its original LICENSE and README next to the local tools. These executables are separate command-line programs; they are **not included in MagiDepth's installer or GitHub assets**.
+The runtime first validates and reuses installed FFmpeg / ffprobe. Only if no compatible pair is found does it download the matching 8.1.2 essentials archive directly from Gyan's published upstream distribution, check its pinned SHA-256, and retain its original LICENSE and README next to the local tools. These executables are separate command-line programs; they are **not included in MagiMagic's installer or GitHub assets**. Reused system installations keep their existing distribution and notices.
 
 - Build and download provider: https://www.gyan.dev/ffmpeg/builds/
 - Exact archive: https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.1.2-essentials_build.zip

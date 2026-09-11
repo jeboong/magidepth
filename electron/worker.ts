@@ -3,18 +3,33 @@ import readline from 'node:readline';
 import path from 'node:path';
 import fs from 'node:fs';
 import type {ProgressEvent} from '../shared/contracts';
+export interface PythonWorkerConfig {
+  python:string;backend:string;bin?:string;models:string;logs:string;
+  ffmpeg?:string;ffprobe?:string;daemonEntry?:string;
+}
+export function workerLaunchConfig(config:PythonWorkerConfig){
+  const entry=config.daemonEntry?path.resolve(config.backend,config.daemonEntry):path.join(config.backend,'daemon.py');
+  const ffmpeg=config.ffmpeg||(config.bin?path.join(config.bin,'ffmpeg.exe'):process.env.FFMPEG_PATH);
+  const ffprobe=config.ffprobe||(config.bin?path.join(config.bin,'ffprobe.exe'):process.env.FFPROBE_PATH);
+  if(!ffmpeg||!ffprobe||!path.isAbsolute(ffmpeg)||!path.isAbsolute(ffprobe))throw new Error('검증된 FFmpeg와 ffprobe의 절대 경로가 필요합니다.');
+  return {entry,env:{...process.env,PYTHONUTF8:'1',PYTHONIOENCODING:'utf-8',FFMPEG_PATH:ffmpeg,FFPROBE_PATH:ffprobe,DEPTHDESK_MODELS_DIR:config.models,HF_HOME:config.models,HF_HUB_DISABLE_TELEMETRY:'1',HF_HUB_DISABLE_SYMLINKS_WARNING:'1'}};
+}
 export class PythonWorker {
   private proc?:ChildProcessWithoutNullStreams;
   private pending=new Map<string,{resolve:(value:any)=>void,reject:(err:Error)=>void}>();
   private tail='';
-  constructor(private config:{python:string;backend:string;bin:string;models:string;logs:string},private progress:(event:ProgressEvent)=>void){}
-  get busy(){return [...this.pending.keys()].some(x=>x.startsWith('preview-')||x.startsWith('render-'));}
+  private stopped=false;
+  private stopping?:Promise<void>;
+  constructor(private config:PythonWorkerConfig,private progress:(event:ProgressEvent)=>void){}
+  get busy(){return this.pending.size>0;}
   private start(){
+    if(this.stopped)throw new Error('AI 엔진이 중지되었습니다. 새 엔진으로 다시 시도해 주세요.');
     if(this.proc)return;
     fs.mkdirSync(this.config.logs,{recursive:true});
-    const proc=spawn(this.config.python,['-u',path.join(this.config.backend,'daemon.py')],{
+    const launch=workerLaunchConfig(this.config);
+    const proc=spawn(this.config.python,['-u',launch.entry],{
       cwd:this.config.backend,windowsHide:true,stdio:['pipe','pipe','pipe'],
-      env:{...process.env,PYTHONUTF8:'1',PYTHONIOENCODING:'utf-8',FFMPEG_PATH:path.join(this.config.bin,'ffmpeg.exe'),FFPROBE_PATH:path.join(this.config.bin,'ffprobe.exe'),DEPTHDESK_MODELS_DIR:this.config.models,HF_HOME:this.config.models,HF_HUB_DISABLE_TELEMETRY:'1',HF_HUB_DISABLE_SYMLINKS_WARNING:'1'},
+      env:launch.env,
     });
     this.proc=proc;
     proc.stderr.on('data',chunk=>{this.tail=(this.tail+chunk.toString()).slice(-5000);fs.appendFileSync(path.join(this.config.logs,'engine.log'),chunk);});
@@ -28,5 +43,24 @@ export class PythonWorker {
     this.start();
     return new Promise<T>((resolve,reject)=>{this.pending.set(id,{resolve,reject});this.proc!.stdin.write(JSON.stringify({id,command,payload})+'\n',err=>{if(err){this.pending.delete(id);reject(err);}});});
   }
-  stop(){for(const p of this.pending.values())p.reject(new Error('AI 엔진이 중지되었습니다.'));this.pending.clear();const old=this.proc;this.proc=undefined;old?.kill();}
+  stop(timeoutMs=5000):Promise<void>{
+    if(this.stopping)return this.stopping;
+    this.stopped=true;
+    for(const p of this.pending.values())p.reject(new Error('AI 엔진이 중지되었습니다.'));
+    this.pending.clear();
+    const old=this.proc;
+    if(!old)return Promise.resolve();
+    // Await close, not just kill(): Windows keeps imported DLLs locked until exit.
+    this.stopping=new Promise<void>((resolve,reject)=>{
+      let settled=false;
+      const finish=(error?:Error)=>{if(settled)return;settled=true;clearTimeout(timer);old.removeListener('close',closed);old.removeListener('error',failed);if(!error&&this.proc===old)this.proc=undefined;error?reject(error):resolve();};
+      const closed=()=>finish();
+      const failed=(error:Error)=>finish(new Error(`AI 엔진을 종료하지 못했습니다: ${error.message}`));
+      const timer=setTimeout(()=>finish(new Error('AI 엔진 종료 시간이 초과되어 설치를 중단했습니다. 앱을 종료한 뒤 다시 시도해 주세요.')),timeoutMs);
+      old.once('close',closed);old.once('error',failed);
+      if(old.exitCode!==null||old.signalCode!==null)finish();
+      else{try{old.kill();}catch(error){failed(error instanceof Error?error:new Error(String(error)));}}
+    }).finally(()=>{this.stopping=undefined;});
+    return this.stopping;
+  }
 }

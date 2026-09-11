@@ -30,6 +30,18 @@ function readPrefs(): Preferences {
       ...defaultPreferences,
       ...stored,
       options: { ...defaultPreferences.options, ...stored.options },
+      cloakOptions: {
+        ...defaultPreferences.cloakOptions,
+        ...stored.cloakOptions,
+        methods: {
+          ...defaultPreferences.cloakOptions.methods,
+          ...stored.cloakOptions?.methods,
+        },
+        grid: {
+          ...defaultPreferences.cloakOptions.grid,
+          ...stored.cloakOptions?.grid,
+        },
+      },
     };
   } catch {
     return structuredClone(defaultPreferences);
@@ -56,6 +68,36 @@ const demo: DepthDeskAPI = {
       input.click();
     }),
   getFilePath: remember,
+  chooseCloakFiles: () =>
+    new Promise((resolve) => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.multiple = true;
+      input.accept = "image/*,video/*,.mkv,.mov,.webm,.avi";
+      input.addEventListener(
+        "change",
+        () => resolve(Array.from(input.files ?? []).map(remember)),
+        { once: true },
+      );
+      input.addEventListener("cancel", () => resolve([]), { once: true });
+      input.click();
+    }),
+  cloakProbe: async (path) => ({
+    ...(await demo.probeVideo(path)),
+    thumbnail: /\.(png|jpe?g|webp|bmp|gif|tiff?)$/i.test(path)
+      ? urls.get(path)
+      : undefined,
+  }),
+  cloakPreview: async () => {
+    throw new Error("실제 Cloak 미리보기는 설치된 데스크톱 앱에서 실행됩니다.");
+  },
+  cloakRender: async () => {
+    throw new Error("실제 Cloak 내보내기는 설치된 데스크톱 앱에서 실행됩니다.");
+  },
+  cancelCloakJob: async () => {},
+  chooseCloakOutputDir: async () => null,
+  chooseCloakSavePath: async () => null,
+  onCloakProgress: () => () => {},
   pasteClipboardImage: async () => {
     try {
       const entries = await navigator.clipboard.read();

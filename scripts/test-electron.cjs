@@ -62,14 +62,18 @@ async function run() {
     app.getAppPath=()=>appRoot;
     assert.equal(app.getAppPath(),appRoot);
     if(packagedDir){
-      assert.ok(fsSync.existsSync(path.join(packagedDir,'MagiDepth.exe')),'Packaged MagiDepth.exe is missing');
       const metadata=JSON.parse(fsSync.readFileSync(path.join(appRoot,'package.json'),'utf8'));
+      assert.ok(fsSync.existsSync(path.join(packagedDir,`${metadata.build?.productName||'MagiMagic'}.exe`)),'Packaged application executable is missing');
       const expected=JSON.parse(fsSync.readFileSync(path.join(root,'package.json'),'utf8'));
       assert.equal(metadata.name,'magidepth');assert.equal(metadata.version,expected.version);packageVersion=metadata.version;
       Object.defineProperty(app,'isPackaged',{value:true,configurable:true});
       Object.defineProperty(process,'resourcesPath',{value:resourceRoot,configurable:true});
       app.getVersion=()=>metadata.version;
       app.setPath('userData',data);
+      // Production pins the legacy MagiDepth cache location after the rename.
+      // Redirect that call only inside this application-owned hidden test host.
+      const setPath=app.setPath.bind(app);
+      app.setPath=(name,value)=>setPath(name,name==='userData'?data:value);
       // Network update checks are explicitly disabled for this offline harness.
       const initialPrefs=prefsExisted?JSON.parse(originalPrefs.toString('utf8')):{};
       fsSync.writeFileSync(prefsPath,JSON.stringify({...initialPrefs,autoUpdate:false,tutorialDone:true}));
@@ -97,10 +101,10 @@ async function run() {
     if(failure)throw failure;
     if(packagedDir)await check('packaged ASAR, version, backend, runtime assets and license resources',async()=>{
       assert.equal(app.isPackaged,true);assert.equal(app.getVersion(),packageVersion);assert.equal(app.getPath('userData'),data);
-      for(const relative of ['backend/daemon.py','backend/engine.py','backend/exporter.py','backend/requirements.txt','runtime-assets/manifest.json','runtime-assets/python-embed.zip','runtime-assets/pip.whl','licenses/MagiDepth-LICENSE.txt','licenses/THIRD_PARTY_NOTICES.md','app-update.yml'])assert.ok((await fs.stat(path.join(resourceRoot,relative))).size>0,`Missing packaged resource ${relative}`);
+      for(const relative of ['backend/daemon.py','backend/cloak_daemon.py','backend/engine.py','backend/exporter.py','backend/requirements.txt','runtime-assets/manifest.json','runtime-assets/python-embed.zip','runtime-assets/pip.whl','licenses/MagiDepth-LICENSE.txt','licenses/THIRD_PARTY_NOTICES.md','app-update.yml'])assert.ok((await fs.stat(path.join(resourceRoot,relative))).size>0,`Missing packaged resource ${relative}`);
       for(const relative of ['app-desktop/main.cjs','app-desktop/preload.cjs','dist/index.html','dist/brand/magidepth.png'])assert.ok((await fs.stat(path.join(appRoot,relative))).size>0,`Missing ASAR asset ${relative}`);
       const updater=await fs.readFile(path.join(resourceRoot,'app-update.yml'),'utf8');assert.match(updater,/provider:\s*github/);assert.match(updater,/repo:\s*magidepth/);
-      console.log(`INFO Packaged MagiDepth v${packageVersion}; loading real ASAR and external resource paths.`);
+      console.log(`INFO Packaged MagiMagic v${packageVersion}; loading real ASAR and external resource paths.`);
     });
     await check('production preload API and renderer isolation',async()=>{
       assert.equal(win.isVisible(),false);
@@ -112,12 +116,13 @@ async function run() {
     });
     await check('runtime readiness and system IPC',async()=>{
       const runtime=await api('getRuntime');assert.equal(runtime.ready,true, runtime.message);
+      assert.equal(runtime.cloakReady,true);assert.ok(runtime.mediaTools?.ffmpeg);assert.ok(runtime.mediaTools?.version);
       const system=await api('getSystem');assert.equal(system.ffmpeg,true);assert.ok(system.python);assert.ok(system.torch);
       assert.equal(typeof system.cuda,'boolean');
       if(packagedDir)assert.equal(system.appVersion,packageVersion);
       console.log(`INFO Electron ${process.versions.electron}; Python ${system.python}; PyTorch ${system.torch}; CUDA available ${system.cuda}`);
     });
-    const ffmpeg=path.join(data,'tools','bin','ffmpeg.exe');
+    const ffmpeg=(await api('getRuntime')).mediaTools.ffmpeg;
     const png=path.join(fixtureDir,'synthetic.png');
     const mp4=path.join(fixtureDir,'synthetic.mp4');
     const hidden=path.join(fixtureDir,'unregistered.png');
@@ -198,6 +203,53 @@ async function run() {
         await clipboard.write([new ClipboardItem({'image/png':new Blob([pngBytes],{type:'image/png'})})]);
         const pasted=await api('pasteClipboardImage');assert.ok(pasted?.endsWith('.png'));const info=await api('probeVideo',pasted);assert.equal(info.kind,'image');assert.equal(info.width,96);assert.equal(info.height,64);
       }finally{if(clipboardBackup.length)await clipboard.write(clipboardBackup);else clipboard.clear();clipboardChanged=false;}
+    });
+    await check('MagiCloak batch selection, separate preferences and live frame IPC',async()=>{
+      openResponses.push({canceled:false,filePaths:[png,mp4]});assert.deepEqual(await api('chooseCloakFiles'),[png,mp4]);
+      openResponses.push({canceled:false,filePaths:[outputDir]});assert.equal(await api('chooseCloakOutputDir'),outputDir);
+      const suggested=path.join(outputDir,'cloak-save.webp');saveResponses.push({canceled:false,filePath:suggested});assert.equal(await api('chooseCloakSavePath',suggested),suggested);
+      const preferences=await api('getPreferences');assert.equal(preferences.cloakOutputDir,outputDir);
+      const manual={...preferences.cloakOptions,methods:{A:false,B:false,C:false},tracking:false,use_grid:true};
+      const saved=await api('setPreferences',{cloakOptions:{...manual,grid:{...manual.grid,rows:9}}});
+      assert.equal(saved.cloakOptions.grid.rows,9);assert.deepEqual(saved.options.maps,['source']);
+      for(const source of [png,mp4]){
+        const info=await api('cloakProbe',source);assert.ok(info.frames>0);assert.match(info.thumbnail,/^data:image\/png;base64,/);
+        const preview=await api('cloakPreview',{jobId:`cloak-preview-${crypto.randomUUID()}`,path:source,time:0,options:manual});
+        assert.match(preview.image,/^data:image\/png;base64,/);assert.notEqual(preview.image,preview.source);assert.equal(preview.faceCount,0);
+      }
+    });
+    await check('MagiCloak mixed batch export, padding, progress and source preservation',async()=>{
+      const preferences=await api('getPreferences');
+      const manual={...preferences.cloakOptions,methods:{A:false,B:false,C:false},tracking:false,use_grid:true,pad_enabled:true,pad_seconds:3,quality:'balanced'};
+      const outputs=[path.join(outputDir,'cloak-image.png'),path.join(outputDir,'cloak-padded.mp4')];
+      await renderer(()=>{window.__testCloakProgress=[];window.__testCloakOff=window.depthdesk.onCloakProgress(event=>window.__testCloakProgress.push(event));});
+      const result=await api('cloakRender',{jobId:`cloak-render-${crypto.randomUUID()}`,jobs:[{path:png,outputPath:outputs[0]},{path:mp4,outputPath:outputs[1]}],options:manual});
+      assert.deepEqual(result.outputs,outputs);assert.equal(result.frames,37);
+      const exported=await api('cloakProbe',outputs[1]);assert.equal(exported.frames,36);assert.equal(exported.fps,12);
+      const events=await renderer(()=>{window.__testCloakOff();return window.__testCloakProgress;});
+      assert.equal(events.filter(event=>event.stage==='file-complete').length,2);assert.ok(events.some(event=>event.preview));
+      assert.ok(events.every(event=>event.progress>=0&&event.progress<=1));
+      assert.equal((await net.fetch(`depthdesk-media://local/?path=${encodeURIComponent(outputs[0])}`)).status,200);
+      assert.equal(crypto.createHash('sha256').update(await fs.readFile(png)).digest('hex'),originalHash);
+      await assert.rejects(()=>api('cloakRender',{jobId:`cloak-render-${crypto.randomUUID()}`,jobs:[{path:png,outputPath:png}],options:manual}),/덮어쓸/);
+      await assert.rejects(()=>api('cloakRender',{jobId:`cloak-render-${crypto.randomUUID()}`,jobs:[{path:png,outputPath:outputs[0]}],options:manual}),/이미/);
+      const destination=path.join(outputDir,'cloak-cancelled.mp4'),jobId=`cloak-render-${crypto.randomUUID()}`;
+      await renderer(request=>{window.__testCloakCancel=window.depthdesk.cloakRender(request).then(()=>({ok:true}),error=>({ok:false,error:String(error)}));return true;},{jobId,jobs:[{path:mp4,outputPath:destination}],options:manual});
+      await api('cancelCloakJob',jobId);const cancelled=await renderer(()=>window.__testCloakCancel);assert.equal(cancelled.ok,false);assert.match(cancelled.error,/cancel|취소/i);
+      await assert.rejects(()=>fs.stat(destination),error=>error.code==='ENOENT');
+    });
+    await check('MagiCloak before padding and MOV MKV M4V through actual IPC',async()=>{
+      const preferences=await api('getPreferences');
+      const options={...preferences.cloakOptions,methods:{A:false,B:false,C:false},tracking:false,use_grid:false,pad_enabled:true,pad_seconds:3,pad_position:'before',quality:'balanced'};
+      const saved=await api('setPreferences',{cloakOptions:options});assert.equal(saved.cloakOptions.pad_position,'before');
+      for(const extension of ['mov','mkv','m4v']){
+        const destination=path.join(outputDir,`cloak-before.${extension}`);
+        saveResponses.push({canceled:false,filePath:destination});assert.equal(await api('chooseCloakSavePath',destination),destination);
+        const result=await api('cloakRender',{jobId:`cloak-prefix-${crypto.randomUUID()}`,jobs:[{path:mp4,outputPath:destination}],options});assert.equal(result.frames,36);
+        const info=await api('cloakProbe',destination);assert.equal(info.frames,36);
+        const first=spawnSync(ffmpeg,['-v','error','-i',destination,'-frames:v','1','-pix_fmt','gray','-f','rawvideo','-'],{windowsHide:true});
+        assert.equal(first.status,0);assert.equal(first.stdout.length,320*180);assert.ok(first.stdout.every(value=>value<3),'First frame must be black, not the original');
+      }
     });
     if(!packagedDir)await check('development update event through preload subscription',async()=>{
       await renderer(()=>{window.__testUpdate=null;window.__testUnsubscribe=window.depthdesk.onUpdate(value=>{window.__testUpdate=value;});});

@@ -4,10 +4,15 @@ function subscribe(channel:string,callback:(event:any)=>void){const listener=(_e
 const api:DepthDeskAPI={
   getPreferences:()=>ipcRenderer.invoke('prefs:get'),setPreferences:p=>ipcRenderer.invoke('prefs:set',p),
   chooseVideo:()=>ipcRenderer.invoke('video:choose'),getFilePath:file=>webUtils.getPathForFile(file),
+  chooseCloakFiles:()=>ipcRenderer.invoke('cloak:choose'),cloakProbe:p=>ipcRenderer.invoke('cloak:probe',p),
+  cloakPreview:p=>ipcRenderer.invoke('cloak:preview',p),cloakRender:p=>ipcRenderer.invoke('cloak:render',p),
+  cancelCloakJob:id=>ipcRenderer.invoke('cloak:cancel',id),
+  chooseCloakOutputDir:()=>ipcRenderer.invoke('cloak:choose-dir'),chooseCloakSavePath:p=>ipcRenderer.invoke('cloak:save-as',p),
+  onCloakProgress:cb=>subscribe('cloak:progress',cb),
   pasteClipboardImage:()=>ipcRenderer.invoke('image:paste'),
   probeVideo:p=>ipcRenderer.invoke('video:probe',p),preview:p=>ipcRenderer.invoke('depth:preview',p),render:p=>ipcRenderer.invoke('depth:render',p),cancelJob:id=>ipcRenderer.invoke('depth:cancel',id),
   chooseOutputDir:()=>ipcRenderer.invoke('output:choose-dir'),chooseSavePath:p=>ipcRenderer.invoke('output:save-as',p),openFolder:p=>ipcRenderer.invoke('output:open-folder',p),revealFile:p=>ipcRenderer.invoke('output:reveal',p),
-  getRuntime:()=>ipcRenderer.invoke('runtime:get'),installRuntime:()=>ipcRenderer.invoke('runtime:install'),getSystem:()=>ipcRenderer.invoke('system:get'),checkForUpdates:()=>ipcRenderer.invoke('update:check'),installUpdate:()=>ipcRenderer.invoke('update:install'),
+  getRuntime:()=>ipcRenderer.invoke('runtime:get'),installRuntime:scope=>ipcRenderer.invoke('runtime:install',scope),getSystem:()=>ipcRenderer.invoke('system:get'),checkForUpdates:()=>ipcRenderer.invoke('update:check'),installUpdate:()=>ipcRenderer.invoke('update:install'),
   onProgress:cb=>subscribe('depth:progress',cb),onRuntime:cb=>subscribe('runtime:progress',cb),onUpdate:cb=>subscribe('update:progress',cb),
 };
 contextBridge.exposeInMainWorld('depthdesk',api);

@@ -10,7 +10,7 @@ const browser=await chromium.launch({headless:true,channel:'chrome'});
 const page=await browser.newPage({viewport:{width:1440,height:1000}});
 const errors=[];page.on('pageerror',e=>errors.push(e.message));
 await page.goto(process.env.UI_TEST_URL??'http://127.0.0.1:5173');
-await page.getByRole('heading',{name:'새로운 차원을 발견하세요.'}).waitFor();
+await page.getByRole('heading',{name:'MagiDepth',exact:true}).waitFor();
 assert.equal(await page.getByRole('button',{name:'1개 맵 영상 내보내기'}).isDisabled(),true);
 await page.getByRole('checkbox',{name:'Normal 표면 방향 추출'}).click();
 assert.equal(await page.getByRole('checkbox',{name:'Normal 표면 방향 추출'}).getAttribute('aria-checked'),'true');
@@ -41,6 +41,10 @@ await fixture.addInitScript(()=>{
   const source=svg('#596e89','#a4ae92'),depth=svg('#111111','#dddddd'),normal=svg('#8899dd','#ca97db');
   let prefs={theme:'dark',outputDir:'C:\\UI-Test-Output',tutorialDone:true,autoUpdate:true,options:{maps:['depth','normal'],processingMode:'fast',previewMap:'depth',normalStrength:1,steps:4,model:'image-small',inputSize:280,nearWhite:true,gamma:1,contrast:.5,device:'auto',precision:'auto',outputSize:'source',codec:'h264'}};
   window.depthdesk={getPreferences:async()=>prefs,setPreferences:async p=>(prefs={...prefs,...p}),chooseVideo:async()=>source,getFilePath:()=>source,pasteClipboardImage:async()=>source,probeVideo:async()=>({kind:'image',path:source,name:'ui-test-image.png',width:800,height:450,fps:1,frames:1,duration:1,hasAudio:false}),preview:async()=>({source,image:depth,images:{source,depth,normal},frame:0,width:800,height:450,elapsed:0}),render:async()=>({outputPath:'C:\\UI-Test-Output\\fixture_depth.png',outputPaths:{depth:'fixture_depth.png',normal:'fixture_normal.png'},frames:1,elapsed:0,fps:0}),cancelJob:async()=>{},chooseOutputDir:async()=>null,chooseSavePath:async()=>null,openFolder:async()=>{},revealFile:async()=>{},getRuntime:async()=>({ready:true,installing:false,progress:1,message:'UI TEST FIXTURE'}),installRuntime:async()=>({ready:true,installing:false,progress:1,message:'UI TEST FIXTURE'}),getSystem:async()=>({cuda:false,gpu:'UI TEST FIXTURE',vramGB:0,freeVramGB:0,torch:'test',python:'test',ffmpeg:true}),checkForUpdates:async()=>{},installUpdate:async()=>{},onProgress:()=>()=>{},onRuntime:()=>()=>{},onUpdate:()=>()=>{}};
+});
+await fixture.addInitScript(()=>{
+  window.depthdesk.onCloakProgress=()=>()=>{};
+  window.depthdesk.chooseCloakFiles=async()=>[];
 });
 await fixture.goto(process.env.UI_TEST_URL??'http://127.0.0.1:5173');
 await fixture.getByRole('button',{name:'파일 선택'}).click();
