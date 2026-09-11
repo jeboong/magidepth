@@ -8,7 +8,6 @@ from pathlib import Path
 import sys
 import time
 import types
-import urllib.request
 
 import cv2
 import numpy as np
@@ -20,22 +19,7 @@ sys.path.insert(0, str(VENDOR))
 
 # No arbitrary Hugging Face remote code is enabled. Revisions and large-file
 # SHA-256 values are pinned from each official repository's metadata.
-MANIFEST = {
-    'video-small': {
-        'repo': 'depth-anything/Video-Depth-Anything-Small',
-        'revision': '256875362cff76724b920335dfb4b29dd611f66e',
-        'files': {'video_depth_anything_vits.pth':
-                  '13379300b739e659f076a59d52e9801bd8d38c541a7e71f73bbca4dcfb013609'},
-    },
-    'image-small': {
-        'repo': 'depth-anything/Depth-Anything-V2-Small-hf',
-        'revision': '5426e4f0f36572d16453bbda7a8389317b1bef99',
-        'files': {
-            'config.json': None, 'preprocessor_config.json': None,
-            'model.safetensors': '3152477ce0d8d6978d76b995120de97cb5b928701fd0f817769f59e249a16b70',
-        },
-    },
-}
+from model_catalog import DEPTH_SPECS as MANIFEST, require_model
 
 
 def model_root() -> Path:
@@ -55,40 +39,9 @@ def sha256(path: Path, check=lambda: None) -> str:
 
 
 def ensure_weights(model_id, progress, check) -> Path:
-    entry = MANIFEST[model_id]
-    destination = model_root() / model_id / entry['revision']
-    destination.mkdir(parents=True, exist_ok=True)
-    for name, expected_hash in entry['files'].items():
-        check()
-        target = destination / name
-        if target.is_file():
-            if expected_hash and sha256(target, check) != expected_hash:
-                raise RuntimeError(f'Model checksum failed: {target.name}. Remove this model from the model cache and retry.')
-            continue
-        part = target.with_suffix(target.suffix + '.download')
-        url = f"https://huggingface.co/{entry['repo']}/resolve/{entry['revision']}/{name}"
-        progress('download', 0, f'Downloading {model_id}: {name}')
-        try:
-            request = urllib.request.Request(url, headers={'User-Agent': 'DepthDesk/1.0'})
-            with urllib.request.urlopen(request, timeout=30) as response, part.open('wb') as stream:
-                length = int(response.headers.get('Content-Length') or 0)
-                received, last_report = 0, 0.0
-                while chunk := response.read(1024 * 1024):
-                    check()
-                    stream.write(chunk)
-                    received += len(chunk)
-                    if time.monotonic() - last_report > 0.2:
-                        progress('download', min(99, received * 100 / length) if length else 0,
-                                 f'Downloading {name}: {received / 1048576:.1f} MB')
-                        last_report = time.monotonic()
-            check()
-            if expected_hash and sha256(part, check) != expected_hash:
-                raise RuntimeError('Downloaded model checksum does not match the pinned release.')
-            os.replace(part, target)
-        except Exception:
-            part.unlink(missing_ok=True)
-            raise
-    return destination
+    # Backwards-compatible local resolver. Downloads are exclusive to the
+    # explicit model catalog action, never an inference side effect.
+    return require_model(model_id, check)
 
 
 def efficient_attention(self, x):
@@ -136,7 +89,7 @@ class Predictor:
             raise ValueError('FP16 requires a CUDA GPU. Choose Auto or FP32 for CPU rendering.')
         self.half = self.device == 'cuda' and options['precision'] != 'fp32'
         self.check = check
-        checkpoint = ensure_weights(self.model_id, progress, check)
+        checkpoint = require_model(self.model_id, check)
         progress('model', 0, f'Loading {self.model_id} on {self.device.upper()}')
         if self.model_id == 'video-small':
             from video_depth_anything.video_depth import VideoDepthAnything

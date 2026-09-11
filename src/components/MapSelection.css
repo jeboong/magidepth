@@ -1,0 +1,21 @@
+.map-card-shell{min-width:0;border:1px solid transparent;border-radius:8px;overflow:hidden}
+.map-card-shell .map-card{width:100%;min-height:64px}
+.map-card-shell.is-unavailable{border-color:hsl(var(--border));background:hsl(var(--background))}
+.map-card-shell.is-unavailable .map-card{border-color:transparent;border-radius:0;opacity:.64;cursor:default}
+.map-download-action{display:flex;align-items:center;justify-content:center;gap:5px;width:100%;padding:7px 5px;font-size:10px;border-top:1px solid hsl(var(--border));color:hsl(var(--foreground));background:hsl(var(--secondary)/.5)}
+.map-download-action:hover:not(:disabled){background:hsl(var(--primary)/.13);color:hsl(var(--primary))}
+.map-download-action:disabled{opacity:.45;cursor:not-allowed}
+.map-download-action:focus-visible{outline:2px solid hsl(var(--ring));outline-offset:-2px}
+.map-availability{display:block;margin-top:3px;font-size:8px!important;color:hsl(var(--muted-foreground))}
+.model-download-panel{margin-top:12px;padding:12px;border:1px solid hsl(var(--border));border-radius:9px;background:hsl(var(--secondary)/.35)}
+.model-download-panel>div:first-child{display:flex;align-items:center;gap:6px;font-size:11px}
+.model-download-panel strong{margin-left:auto;font-variant-numeric:tabular-nums}
+.model-download-panel p{font-size:10px;line-height:1.7;overflow-wrap:anywhere;margin:8px 0;color:hsl(var(--muted-foreground))}
+.model-download-panel .progress-track{margin-top:9px}
+.model-download-error{font-size:11px;line-height:1.7;color:#c26666;margin:9px 0;overflow-wrap:anywhere}
+.model-status-note{display:flex;gap:6px;align-items:center;justify-content:space-between;margin-top:8px;font-size:10px;color:hsl(var(--muted-foreground))}
+.model-status-note button{text-decoration:underline;text-underline-offset:3px}
+.playback-notice{display:flex;gap:9px;align-items:center;justify-content:space-between;padding:9px 14px;border-top:1px solid hsl(var(--border));font-size:11px;color:hsl(var(--muted-foreground));background:hsl(var(--secondary)/.3)}
+.playback-notice span{display:flex;align-items:center;gap:6px}
+.playback-notice button{flex-shrink:0;color:hsl(var(--foreground));text-decoration:underline;text-underline-offset:3px}
+.timeline-track>[role=group],.timeline-track>[data-orientation=horizontal]{min-height:22px;cursor:pointer}

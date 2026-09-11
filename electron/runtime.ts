@@ -29,7 +29,7 @@ const FULL_IMPORTS='import torch, torchvision, transformers, cv2, numpy, PIL, ea
 
 /** Python, depth dependencies, Cloak dependencies and media tools are independent repair stages. */
 export class RuntimeManager {
-  status:RuntimeStatus={ready:false,cloakReady:false,installing:false,progress:0,message:'MagiMagic 엔진과 설치된 영상 도구를 확인합니다.'};
+  status:RuntimeStatus={ready:false,cloakReady:false,depthModelsReady:false,installing:false,progress:0,message:'MagiMagic 엔진과 설치된 영상 도구를 확인합니다.'};
   private current?:Promise<RuntimeStatus>;
   private currentScope?:'depth'|'cloak';
   private inspecting?:Promise<RuntimeStatus>;
@@ -47,6 +47,10 @@ export class RuntimeManager {
   }
   get pythonPath(){return this.devPython||path.join(this.runtimeDir,'python.exe');}
   get modelsDir(){return path.join(this.userData,'models');}
+  setDepthModelsReady(ready:boolean){this.report({depthModelsReady:ready});}
+  reportModelSetup(progress:number,message:string,complete=false,error?:string){
+    this.report({installing:!complete&&!error,progress,message,error,depthModelsReady:complete});
+  }
   /** Legacy private location only. Consumers should pass mediaTools' distinct paths. */
   get binDir(){return path.join(this.userData,'tools','bin');}
   get mediaTools(){return this.resolvedMedia?{...this.resolvedMedia}:undefined;}

@@ -1,5 +1,7 @@
 import {defaultCloakOptions, type CloakOptions, type CloakPreviewResult, type CloakRenderResult, type CloakProgressEvent} from './cloak';
 export * from './cloak';
+export * from './model-catalog';
+import type {DownloadModelId, ModelCatalog, ModelDownloadProgress} from './model-catalog';
 export type ModelId = 'video-small' | 'image-small';
 export type MapKind = 'source' | 'depth' | 'normal' | 'alpha' | 'basecolor' | 'metallic' | 'roughness' | 'specular';
 export interface DepthOptions {
@@ -42,6 +44,7 @@ export interface RuntimeStatus {
   ready: boolean; installing: boolean; progress: number; message: string;
   error?: string; pythonPath?: string;
   cloakReady?: boolean;
+  depthModelsReady?: boolean;
   mediaTools?: MediaToolsInfo;
 }
 export interface MediaToolsInfo {
@@ -71,6 +74,9 @@ export interface DepthDeskAPI {
   pasteClipboardImage(): Promise<string | null>;
   getFilePath(file: File): string;
   probeVideo(path: string): Promise<VideoInfo>;
+  preparePlayback(request: {jobId: string; path: string}): Promise<{path: string; proxy: boolean; cached: boolean}>;
+  cancelPlayback(jobId: string): Promise<void>;
+  onPlaybackProgress(cb: (event: ProgressEvent) => void): () => void;
   preview(request: {jobId: string; path: string; time: number; options: DepthOptions}): Promise<PreviewResult>;
   render(request: {jobId: string; path: string; trimStart: number; trimEnd: number; outputPath: string; options: DepthOptions}): Promise<RenderResult>;
   cancelJob(jobId: string): Promise<void>;
@@ -80,8 +86,14 @@ export interface DepthDeskAPI {
   revealFile(path: string): Promise<void>;
   getRuntime(): Promise<RuntimeStatus>;
   installRuntime(scope?: 'depth' | 'cloak'): Promise<RuntimeStatus>;
+  getModelCatalog(): Promise<ModelCatalog>;
+  downloadModel(request: {jobId: string; modelId: DownloadModelId}): Promise<ModelCatalog>;
+  cancelModelDownload(jobId: string): Promise<void>;
+  onModelProgress(cb: (event: ModelDownloadProgress) => void): () => void;
   getSystem(): Promise<SystemInfo>;
   checkForUpdates(): Promise<void>;
+  getUpdateStatus(): Promise<UpdateStatus>;
+  downloadUpdate(): Promise<void>;
   installUpdate(): Promise<void>;
   onProgress(cb: (event: ProgressEvent) => void): () => void;
   onRuntime(cb: (event: RuntimeStatus) => void): () => void;

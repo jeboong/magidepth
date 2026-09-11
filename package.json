@@ -1,6 +1,6 @@
 {
   "name": "magidepth",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "MagiMagic — local depth maps and face-grid magic in one workspace.",
   "private": true,
   "main": "app-desktop/main.cjs",

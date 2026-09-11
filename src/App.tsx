@@ -26,7 +26,6 @@ import {
   Pause,
   Play,
   RefreshCw,
-  Scissors,
   Settings2,
   ShieldCheck,
   SlidersHorizontal,
@@ -69,6 +68,11 @@ import { Tutorial } from "./components/Tutorial";
 import { Onboarding, type StartupWorkspace } from "./components/Onboarding";
 import { WorkspaceFaceNav } from "./components/WorkspaceFaceNav";
 import { CloakWorkspace } from "./cloak/CloakWorkspace";
+import { VideoTrimEditor } from "./components/VideoTrimEditor";
+import { useModelDownloads } from "./lib/useModelDownloads";
+import { UpdateNotice } from "./components/UpdateNotice";
+import { useVideoPlayback } from "./lib/useVideoPlayback";
+import "./components/MapSelection.css";
 
 type ViewMode = "compare" | "source" | "depth";
 const initialRuntime: RuntimeStatus = {
@@ -92,39 +96,6 @@ const mapTypes: { key: MapKind; name: string; caption: string }[] = [
   { key: "roughness", name: "Roughness", caption: "거칠기" },
   { key: "specular", name: "Specular", caption: "반사 강도" },
 ];
-function NumberField({
-  label,
-  value,
-  max,
-  onChange,
-  disabled,
-}: {
-  label: string;
-  value: number;
-  max: number;
-  onChange: (v: number) => void;
-  disabled?: boolean;
-}) {
-  return (
-    <label className="time-field">
-      <span>{label}</span>
-      <input
-        aria-label={label}
-        type="number"
-        min={0}
-        max={max}
-        step={0.01}
-        value={Number(value.toFixed(3))}
-        disabled={disabled}
-        onChange={(e) => {
-          const v = Number(e.target.value);
-          if (Number.isFinite(v)) onChange(Math.max(0, Math.min(max, v)));
-        }}
-      />
-      <small>초</small>
-    </label>
-  );
-}
 function RangeSetting({
   label,
   value,
@@ -176,8 +147,7 @@ export default function App() {
   const [system, setSystem] = useState<SystemInfo | null>(null);
   const [update, setUpdate] = useState<UpdateStatus>({ status: "idle" });
   const [time, setTime] = useState(0);
-  const [trimStart, setTrimStart] = useState(0);
-  const [trimEnd, setTrimEnd] = useState(0);
+  const [trimRange, setTrimRange] = useState<{start:number;end:number}|null>(null);
   const [view, setView] = useState<ViewMode>("compare");
   const [split, setSplit] = useState(50);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
@@ -199,14 +169,21 @@ export default function App() {
   const [savePath, setSavePath] = useState("");
   const [cancelling, setCancelling] = useState(false);
   const player = useRef<HTMLVideoElement>(null);
+  const pendingSeek = useRef<number|null>(null);
   const stage = useRef<HTMLDivElement>(null);
   const activeJob = useRef<string | null>(null);
   const options = prefs.options;
+  const models = useModelDownloads(runtime.ready && !runtime.installing, options);
+  const modelsBusy = !!models.job || !!models.catalog?.busy;
+  const selectedMapsReady = options.maps.every(map => models.readyFor(map));
   const busy = !!job;
+  const playback = useVideoPlayback(video,busy || modelsBusy || cloakBusy || runtime.installing);
   const interactionBlocked = onboarding || !loaded;
   const canRender =
-    !!video && runtime.ready && !busy && !cloakBusy && !isBrowserDemo && !interactionBlocked;
+    !!video && runtime.ready && selectedMapsReady && !modelsBusy && !playback.busy && !runtime.installing && !opening && !busy && !cloakBusy && !isBrowserDemo && !interactionBlocked;
   const isImage = video?.kind === "image";
+  const trimStart = isImage ? 0 : trimRange?.start ?? 0;
+  const trimEnd = isImage ? 1 : trimRange?.end ?? video?.duration ?? 0;
 
   useEffect(() => {
     let alive = true;
@@ -248,7 +225,14 @@ export default function App() {
     const offProgress = api.onProgress((p) => {
       if (p.jobId === activeJob.current) setProgress(p);
     });
-    const offUpdate = api.onUpdate(setUpdate);
+    let updateEventReceived = false;
+    const offUpdate = api.onUpdate(status => {
+      updateEventReceived = true;
+      if (alive) setUpdate(status);
+    });
+    api.getUpdateStatus().then(status => {
+      if (alive && !updateEventReceived) setUpdate(status);
+    }).catch(() => {});
     return () => {
       alive = false;
       offRuntime();
@@ -276,6 +260,12 @@ export default function App() {
     setPrefs((old) => ({ ...old, ...patch }));
     api.setPreferences(patch).catch((e) => setError(errorMessage(e)));
   }, []);
+  useEffect(() => {
+    if (!models.catalog || models.loading || modelsBusy) return;
+    const available = options.maps.filter(map => models.readyFor(map));
+    const maps = available.length ? available : ["source" as MapKind];
+    if (maps.join() !== options.maps.join() || !maps.includes(options.previewMap)) savePrefs({options:{...options,maps,previewMap:maps.includes(options.previewMap)?options.previewMap:maps[0]}});
+  }, [models.catalog,models.loading,modelsBusy,models.readyFor,options,savePrefs]);
   const completeOnboarding = useCallback(async (selected: StartupWorkspace) => {
     const saved = await api.setPreferences({ onboardingDone: true, startupWorkspace: selected });
     setPrefs(saved);
@@ -285,7 +275,7 @@ export default function App() {
     setOnboarding(false);
   }, []);
   const reopenFeaturePicker = () => {
-    if (busy || cloakBusy || opening) return;
+    if (busy || modelsBusy || playback.busy || cloakBusy || opening) return;
     setSettings(false);
     setTutorial(false);
     setCloakTutorial(false);
@@ -311,8 +301,15 @@ export default function App() {
         0,
         Math.min(Math.max(0, video.duration - 1 / video.fps), v),
       );
+      // Scrubbing navigates the live source, never the last rendered still.
+      setView("source");
+      setPlaying(false);
+      player.current?.pause();
+      pendingSeek.current = next;
       setTime(next);
-      if (player.current) player.current.currentTime = next;
+      if (player.current && player.current.readyState >= 1) {
+        try { player.current.currentTime = next; } catch { /* Retry after metadata. */ }
+      }
     },
     [video],
   );
@@ -327,7 +324,7 @@ export default function App() {
   );
   const openVideo = useCallback(
     async (path?: string) => {
-      if (busy || interactionBlocked) return;
+      if (busy || modelsBusy || playback.busy || interactionBlocked) return;
       setError("");
       try {
         const next = path ?? (await api.chooseVideo());
@@ -343,8 +340,8 @@ export default function App() {
           );
         setVideo(info);
         setTime(0);
-        setTrimStart(0);
-        setTrimEnd(info.duration || 1);
+        setTrimRange(null);
+        pendingSeek.current = 0;
         setPreview(null);
         setResult(null);
         setSavePath("");
@@ -356,7 +353,7 @@ export default function App() {
         setOpening(false);
       }
     },
-    [busy, interactionBlocked],
+    [busy, modelsBusy, playback.busy, interactionBlocked],
   );
   useEffect(() => {
     const paste = (e: KeyboardEvent) => {
@@ -395,6 +392,7 @@ export default function App() {
       if (
         ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) ||
         target.isContentEditable ||
+        target.closest('[role="slider"], [data-video-trim-editor]') ||
         settings ||
         tutorial
       )
@@ -415,7 +413,10 @@ export default function App() {
       if (e.code === "Space" && e.target === document.body) {
         e.preventDefault();
         if (player.current) {
-          if (player.current.paused) void player.current.play();
+          if (player.current.paused) {
+            setView("source");
+            void player.current.play().catch(() => setToast("재생할 수 없는 영상입니다. 호환 미리보기를 준비해 주세요."));
+          }
           else player.current.pause();
         }
       }
@@ -459,7 +460,7 @@ export default function App() {
     }
   };
   const runPreview = async () => {
-    if (!video || !runtime.ready || busy || cloakBusy || interactionBlocked) return;
+    if (!video || !canRender) return;
     const id = crypto.randomUUID();
     activeJob.current = id;
     setJob({ id, kind: "preview" });
@@ -574,6 +575,7 @@ export default function App() {
         ? preview?.source
         : undefined);
   const toggleMap = (map: MapKind) => {
+    if (modelsBusy || !models.readyFor(map)) return;
     const selected = options.maps ?? ["depth"];
     const maps = selected.includes(map)
       ? selected.filter((v) => v !== map)
@@ -641,7 +643,7 @@ export default function App() {
             </span>
             <span className="brand-tag">STUDIO</span>
           </a>
-          <WorkspaceFaceNav value={workspace} onChange={switchWorkspace} depthBusy={busy} cloakBusy={cloakBusy} />
+          <WorkspaceFaceNav value={workspace} onChange={switchWorkspace} depthBusy={busy || modelsBusy || playback.busy} cloakBusy={cloakBusy} />
           <div className="header-right">
             <span className="local-badge">
               <span />
@@ -695,6 +697,12 @@ export default function App() {
           </div>
           </div>
         </header>
+        {!onboarding && <UpdateNotice
+          status={update}
+          blocked={busy || modelsBusy || playback.busy || cloakBusy || runtime.installing || opening}
+          onDownload={() => api.downloadUpdate()}
+          onInstall={() => api.installUpdate()}
+        />}
         <main
           id="workspace-panel-depth"
           role="tabpanel"
@@ -726,7 +734,7 @@ export default function App() {
                 실행됩니다.
               </div>
             )}
-            {!isBrowserDemo && !runtime.ready && (
+            {!isBrowserDemo && (!runtime.ready || runtime.installing) && (
               <div
                 className={cn("runtime-banner", runtime.error && "has-error")}
               >
@@ -897,7 +905,8 @@ export default function App() {
                     ) : (
                       <video
                         ref={player}
-                        src={mediaUrl(video.path)}
+                        key={playback.sourceUrl}
+                        src={playback.sourceUrl}
                         className={cn(
                           "source-video",
                           (view === "depth" ||
@@ -906,18 +915,26 @@ export default function App() {
                         )}
                         preload="auto"
                         playsInline
-                        onTimeUpdate={() => {
-                          if (player.current)
-                            setTime(player.current.currentTime);
+                        onLoadedMetadata={event => {
+                          const target=pendingSeek.current ?? time;
+                          if (Number.isFinite(target)) event.currentTarget.currentTime=Math.min(target,Math.max(0,video.duration-1/video.fps));
                         }}
-                        onPlay={() => setPlaying(true)}
+                        onSeeked={event => {
+                          const element=event.currentTarget;
+                          // Chromium may snap to the nearest decodable timestamp
+                          // (e.g. a MOV edit-list / B-frame offset). Reassigning
+                          // currentTime here can create an endless seeking loop.
+                          if(element.seeking)return;
+                          pendingSeek.current=null;
+                          setTime(element.currentTime);
+                        }}
+                        onTimeUpdate={event => {
+                          if (pendingSeek.current===null) setTime(event.currentTarget.currentTime);
+                        }}
+                        onPlay={() => {pendingSeek.current=null;setPlaying(true);setView("source");}}
                         onPause={() => setPlaying(false)}
                         onEnded={() => setPlaying(false)}
-                        onError={() =>
-                          setToast(
-                            "원본 재생이 지원되지 않는 코덱입니다. 프레임 미리보기를 이용하세요.",
-                          )
-                        }
+                        onError={playback.mediaError}
                       />
                     )}
                     {!playing && mapImage && view === "compare" && (
@@ -1038,6 +1055,10 @@ export default function App() {
               </div>
               {!isImage ? (
                 <div className="timeline">
+                  {video && playback.phase !== "native" && <div className="playback-notice" role="status">
+                    <span>{playback.busy && <LoaderCircle className="animate-spin" size={13}/>}{playback.phase==="proxy" ? "호환 미리보기 · 원본과 내보내기 품질은 그대로" : playback.phase==="waiting" ? "진행 중인 작업 뒤에 호환 미리보기를 준비합니다." : playback.phase==="preparing" ? `재생용 사본 준비 중 · ${Math.round((playback.progress?.progress??0)*100)}%` : playback.error}</span>
+                    {playback.busy ? <button onClick={()=>void playback.cancel()}>취소</button> : playback.phase==="error" && <button disabled={busy||modelsBusy||cloakBusy} onClick={()=>void playback.prepare()}>다시 준비</button>}
+                  </div>}
                   <div className="timeline-top">
                     <div className="playback-controls">
                       <Tooltip label="이전 프레임 (←)">
@@ -1055,7 +1076,7 @@ export default function App() {
                         variant="secondary"
                         size="icon"
                         aria-label={playing ? "일시 정지" : "원본 재생"}
-                        disabled={!video}
+                        disabled={!video || busy || playback.busy}
                         onClick={() => {
                           if (player.current) {
                             if (playing) player.current.pause();
@@ -1064,9 +1085,7 @@ export default function App() {
                               void player.current
                                 .play()
                                 .catch(() =>
-                                  setError(
-                                    "원본 재생이 지원되지 않습니다. 프레임 미리보기를 사용해 주세요.",
-                                  ),
+                                  playback.mediaError(),
                                 );
                             }
                           }
@@ -1131,78 +1150,21 @@ export default function App() {
                       <span>{video ? formatTime(video.duration) : "—"}</span>
                     </div>
                   </div>
-                  <div className="trim-row">
-                    <span className="trim-label">
-                      <Scissors size={13} />
-                      구간 자르기
-                    </span>
-                    <NumberField
-                      label="시작"
-                      value={trimStart}
-                      max={video?.duration ?? 0}
-                      onChange={(v) => setTrimStart(Math.min(v, trimEnd))}
-                      disabled={!video || busy}
-                    />
-                    <Tooltip label="현재 프레임을 시작 지점으로">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="trim-current"
-                        aria-label="현재 위치를 시작으로"
-                        onClick={() => setTrimStart(Math.min(time, trimEnd))}
-                        disabled={!video || busy}
-                      >
-                        [
-                      </Button>
-                    </Tooltip>
-                    <span className="trim-dash">—</span>
-                    <NumberField
-                      label="종료"
-                      value={trimEnd}
-                      max={video?.duration ?? 0}
-                      onChange={(v) => setTrimEnd(Math.max(trimStart, v))}
-                      disabled={!video || busy}
-                    />
-                    <Tooltip label="현재 프레임까지 포함하여 종료 지점으로">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="trim-current"
-                        aria-label="현재 위치를 종료로"
-                        onClick={() =>
-                          setTrimEnd(
-                            Math.max(
-                              trimStart,
-                              Math.min(
-                                video?.duration ?? 0,
-                                time + 1 / (video?.fps ?? 30),
-                              ),
-                            ),
-                          )
-                        }
-                        disabled={!video || busy}
-                      >
-                        ]
-                      </Button>
-                    </Tooltip>
-                    <span className="trim-duration">
-                      {formatTime(Math.max(0, trimEnd - trimStart), true)} 선택
-                    </span>
-                    <Tooltip label="전체 구간으로 복원">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label="트림 초기화"
-                        disabled={!video || busy}
-                        onClick={() => {
-                          setTrimStart(0);
-                          setTrimEnd(video?.duration ?? 0);
-                        }}
-                      >
-                        <RefreshCw size={12} />
-                      </Button>
-                    </Tooltip>
-                  </div>
+                  {video && <VideoTrimEditor
+                    key={video.path}
+                    sourceUrl={playback.sourceUrl}
+                    duration={video.duration}
+                    fps={video.fps}
+                    currentTime={time}
+                    value={trimRange}
+                    disabled={busy || playback.busy || opening}
+                    onSeek={seek}
+                    onApply={range => {
+                      setTrimRange(range);
+                      if (range) seek(range.start);
+                      setToast(range ? "자르기를 적용했습니다. 선택 구간만 내보냅니다." : "전체 영상으로 복원했습니다.");
+                    }}
+                  />}
                 </div>
               ) : (
                 <div className="image-preview-toolbar">
@@ -1318,34 +1280,53 @@ export default function App() {
                   <span>{options.maps.length} SELECTED</span>
                 </div>
                 <div className="map-selection-grid">
-                  {mapTypes.map((m) => (
+                  {mapTypes.map((m) => {
+                    const ready = models.readyFor(m.key);
+                    const missing = models.missingFor(m.key)[0];
+                    const downloading = !!missing && models.job?.modelId === missing;
+                    return <div key={m.key} className={cn("map-card-shell", !ready && "is-unavailable")}>
                     <button
                       key={m.key}
                       role="checkbox"
-                      aria-checked={options.maps.includes(m.key)}
+                      aria-checked={ready && options.maps.includes(m.key)}
                       aria-label={`${m.name} ${m.caption} 추출`}
-                      disabled={busy}
+                      disabled={busy || modelsBusy || playback.busy || !ready}
                       onClick={() => toggleMap(m.key)}
                       className={cn(
                         "map-card",
-                        options.maps.includes(m.key) && "selected",
+                        ready && options.maps.includes(m.key) && "selected",
                       )}
                     >
                       <span className={`map-swatch map-${m.key}`} />
                       <span>
                         <strong>{m.name}</strong>
                         <small>{m.caption}</small>
+                        <small className="map-availability">{ready ? m.key === "depth" ? "기본 모델 · 준비됨" : "사용 가능" : models.loading ? "설치 확인 중…" : "모델 준비 필요"}</small>
                       </span>
                       <span className="map-check">
-                        {options.maps.includes(m.key) && <Check size={9} />}
+                        {ready && options.maps.includes(m.key) && <Check size={9} />}
                       </span>
                     </button>
-                  ))}
+                    {!ready && <button className="map-download-action" aria-label={`${m.name} 모델 다운로드`} disabled={!runtime.ready || runtime.installing || busy || playback.busy || cloakBusy || modelsBusy || models.loading || !missing || isBrowserDemo} onClick={() => missing && void models.download(missing)}>
+                      {downloading ? <LoaderCircle size={11} className="animate-spin"/> : <Download size={11}/>}
+                      {downloading ? "다운로드 중…" : m.key === "depth" ? "기본 모델 준비" : "모델 다운로드"}
+                    </button>}
+                    </div>;
+                  })}
                 </div>
+                <div className="model-status-note"><span>{models.catalog?.basicReady ? "Depth 기본 모델 설치됨" : "Depth는 최초 셋업에 기본 포함됩니다."}</span><button disabled={modelsBusy || !runtime.ready || runtime.installing || models.loading} onClick={() => void models.refresh()} aria-label="모델 설치 상태 다시 확인">다시 확인</button></div>
+                {!runtime.ready && <p className="setting-hint">먼저 실행 환경을 준비하면 Depth 기본 모델이 함께 설치됩니다.</p>}
+                {models.error && <p className="model-download-error" role="alert">{models.error}</p>}
+                {models.job && <div className="model-download-panel" aria-live="polite">
+                  <div><LoaderCircle size={13} className="animate-spin"/><span>모델 다운로드</span><strong>{Math.round((models.progress?.progress ?? 0)*100)}%</strong></div>
+                  <div className="progress-track" role="progressbar" aria-label="모델 다운로드 진행률" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round((models.progress?.progress ?? 0)*100)}><i style={{width:`${Math.round((models.progress?.progress ?? 0)*100)}%`}}/></div>
+                  <p>{models.progress?.message || "필요한 모델 파일을 준비하고 있습니다…"}</p>
+                  <Button size="sm" variant="outline" onClick={() => void models.cancel()}>다운로드 취소</Button>
+                </div>}
                 <div className="processing-mode">
                   <button
                     onClick={() => changeOption("processingMode", "fast")}
-                    disabled={busy}
+                    disabled={busy || modelsBusy}
                     className={cn(
                       options.processingMode === "fast" && "active",
                     )}
@@ -1355,7 +1336,7 @@ export default function App() {
                   </button>
                   <button
                     onClick={() => changeOption("processingMode", "advanced")}
-                    disabled={busy}
+                    disabled={busy || modelsBusy}
                     className={cn(
                       options.processingMode === "advanced" && "active",
                     )}
@@ -1366,7 +1347,7 @@ export default function App() {
                 </div>
                 <p className="setting-hint">
                   {options.processingMode === "advanced"
-                    ? "Marigold AI로 Normal·재질 맵을 추정합니다. 추가 모델 다운로드 및 처리 시간이 필요합니다."
+                    ? "Marigold AI로 Normal·재질 맵을 추정합니다. 모델 다운로드 완료 후 원하는 맵을 선택하세요. 재질 4종은 같은 모델을 공유합니다."
                     : "Depth AI 기반으로 빠르게 처리합니다. Normal·재질 맵은 경량 근사 결과입니다."}{" "}
                   Specular는 반사 근사값입니다.
                 </p>
@@ -1749,7 +1730,9 @@ export default function App() {
                   ? "이미지나 영상을 불러오면 시작할 수 있습니다."
                   : !runtime.ready
                     ? "AI 환경 준비 후 렌더할 수 있습니다."
-                    : `원본은 그대로, 새로운 ${isImage ? "PNG" : "MP4"}로 저장됩니다.`}
+                    : !selectedMapsReady || modelsBusy
+                      ? "선택한 맵의 모델 준비가 완료되면 내보낼 수 있습니다."
+                      : `원본은 그대로, ${!isImage ? trimRange ? "적용한 구간을 " : "전체 영상을 " : ""}새로운 ${isImage ? "PNG" : "MP4"}로 저장됩니다.`}
               </div>
             </div>
           </aside>
@@ -1759,7 +1742,7 @@ export default function App() {
           runtime={runtime}
           prefs={prefs}
           savePreferences={savePrefs}
-          externalBusy={busy || interactionBlocked}
+          externalBusy={busy || modelsBusy || playback.busy || interactionBlocked}
           onBusyChange={setCloakBusy}
           tutorialOpen={cloakTutorial && !onboarding}
           onTutorialClose={() => setCloakTutorial(false)}
@@ -1903,15 +1886,15 @@ export default function App() {
             </div>
             <div className="settings-modal-section">
               <div className="flex items-center justify-between">
-                <h3>자동 업데이트</h3>
+                <h3>업데이트 자동 다운로드</h3>
                 <Switch
                   checked={prefs.autoUpdate}
                   onCheckedChange={(v) => savePrefs({ autoUpdate: v })}
-                  aria-label="자동 업데이트"
+                  aria-label="업데이트 자동 다운로드"
                 />
               </div>
               <p>
-                새 버전이 있으면 다운로드합니다. 적용 시 앱이 다시 시작됩니다.
+                실행할 때마다 새 버전을 확인하고 알려드립니다. 이 옵션을 켜면 자동으로 다운로드하며, 설치는 직접 선택할 때만 진행됩니다.
               </p>
               <div className="update-actions">
                 <span>
@@ -1929,11 +1912,14 @@ export default function App() {
                     void (
                       update.status === "ready"
                         ? api.installUpdate()
-                        : api.checkForUpdates()
+                        : update.status === "available" || (update.status === "error" && update.version)
+                          ? api.downloadUpdate()
+                          : api.checkForUpdates()
                     ).catch((e) => setError(errorMessage(e)))
                   }
                   disabled={
                     isBrowserDemo ||
+                    (update.status === "ready" && (busy || modelsBusy || playback.busy || cloakBusy || runtime.installing || opening)) ||
                     update.status === "checking" ||
                     update.status === "downloading"
                   }
@@ -1942,7 +1928,11 @@ export default function App() {
                     ? "재시작 및 적용"
                     : update.status === "checking"
                       ? "확인 중…"
-                      : "업데이트 확인"}
+                      : update.status === "downloading"
+                        ? `다운로드 ${Math.round(update.percent || 0)}%`
+                        : update.status === "available" || (update.status === "error" && update.version)
+                          ? "업데이트 다운로드"
+                          : "업데이트 확인"}
                 </Button>
               </div>
             </div>

@@ -33,10 +33,12 @@ async function fixture(){
     busy=false; stopped=false;
     constructor(config){this.config=config;this.id=created.length;created.push(this);}
     async stop(){events.push(`stop:${this.id}`);if(this.stopGate)await this.stopGate;this.stopped=true;events.push(`closed:${this.id}`);}
-    async request(id,command,payload){events.push(`request:${this.id}:${command}`);return command==='render'?{outputs:payload.jobs?.map(job=>job.outputPath)||[]}:{};}
+    async request(id,command,payload){events.push(`request:${this.id}:${command}`);if(command==='download'&&this.downloadGate)return this.downloadGate;if(command==='catalog'||command==='download')return {models:[],basicReady:true};return command==='render'?{outputs:payload.jobs?.map(job=>job.outputPath)||[]}:{};}
   }
   const {__audit}=executeBundle(mainBundle.outputFiles[0].text,{electron,'electron-updater':{autoUpdater:{}},'./runtime':{RuntimeManager:class{}},'./worker':{PythonWorker:FakeWorker}},dir);
   const state={ready:true,cloakReady:true,installing:false},runtime={status:state,pythonPath:path.join(dir,'python.exe'),binDir:path.join(dir,'private-tools'),modelsDir:path.join(dir,'models'),mediaTools:{ffmpeg:path.join(dir,'Tool One','ffmpeg.exe'),ffprobe:path.join(dir,'Tool Two','ffprobe.exe')},inspect:async()=>state,install:async()=>{events.push('install:depth');return state;},installCloak:async()=>{events.push('install:cloak');return state;}};
+  runtime.setDepthModelsReady=ready=>{state.depthModelsReady=ready;};
+  runtime.reportModelSetup=(progress,message,complete=false,error)=>{Object.assign(state,{progress,message,installing:!complete&&!error,depthModelsReady:complete,error});};
   const window={webContents:{mainFrame:{url:'depthdesk://app/index.html'}}};
   __audit.init(runtime,window);__audit.setupIPC();
   const call=(name,...args)=>handlers.get(name)({sender:window.webContents,senderFrame:window.webContents.mainFrame},...args);
@@ -85,6 +87,42 @@ test('Cloak save-as and render accept MP4 MOV MKV M4V; depth remains MP4 only',a
   assert.deepEqual(f.dialogs[0].filters.flatMap(filter=>filter.extensions),['mp4','mov','mkv','m4v']);
   await assert.rejects(f.call('cloak:render',{jobId:'cloak-render-bad',jobs:[{path:input,outputPath:path.join(f.dir,'bad.avi')}]}),/\.mp4, \.mov, \.mkv/);
   await assert.rejects(f.call('depth:render',{jobId:'render-depth-mov',path:input,outputPath:path.join(f.dir,'depth.mov'),options:{}}),/\.mp4/);
+});
+
+test('model status uses a separate catalog worker and never queues a download',async()=>{
+  const f=await fixture();const result=await f.call('models:catalog');
+  assert.equal(result.basicReady,true);assert.equal(f.state.depthModelsReady,true);
+  assert.equal(f.created[0].config.daemonEntry,'model_daemon.py');
+  assert.equal(f.events.some(event=>event.endsWith(':download')),false);
+});
+
+test('explicit model download rejects unknown IDs and cannot bypass active-job guards through extra IPC arguments',async()=>{
+  const f=await fixture();
+  await assert.rejects(f.call('models:download',{jobId:'bad',modelId:'../../outside'}),/잘못된/);
+  f.audit.activeJobs.add('render');
+  await assert.rejects(f.call('models:download',{jobId:'prepare',modelId:'image-small'},true),/진행 중/);
+  assert.equal(f.created.length,0);
+});
+
+test('model download busy state blocks render/engine repair and supports cancellation',async()=>{
+  const f=await fixture();await f.call('models:catalog');const worker=f.created[0];let rejectDownload;
+  worker.downloadGate=new Promise((_resolve,reject)=>{rejectDownload=reject;});
+  const download=f.call('models:download',{jobId:'model-job',modelId:'alpha-fast'});
+  await Promise.resolve();await Promise.resolve();
+  assert.deepEqual((await f.call('models:catalog')).busy,{jobId:'model-job',modelId:'alpha-fast'});
+  await assert.rejects(f.call('depth:preview',{jobId:'preview-job'}),/진행 중/);
+  await assert.rejects(f.audit.installRuntime('cloak'),/작업이 끝난/);
+  await f.call('models:cancel','model-job');assert.ok(f.events.some(event=>event.endsWith(':cancel')));
+  const rejected=assert.rejects(download,/cancelled/);rejectDownload(Error('cancelled'));await rejected;
+  assert.equal(f.audit.activeJobs.size,0);
+});
+
+test('explicit Depth setup prepares both basic models; Cloak setup never downloads depth models',async()=>{
+  const depth=await fixture();await depth.audit.installRuntime('depth');
+  assert.equal(depth.events.filter(event=>event.endsWith(':download')).length,2);
+  assert.equal(depth.state.depthModelsReady,true);assert.equal(depth.state.installing,false);
+  const cloak=await fixture();await cloak.audit.installRuntime('cloak');
+  assert.equal(cloak.events.some(event=>event.endsWith(':download')),false);
 });
 
 function workerFixture(){

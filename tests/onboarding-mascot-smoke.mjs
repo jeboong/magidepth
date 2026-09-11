@@ -37,7 +37,7 @@ async function fixture({ ready = false, cloakReady = false, reducedMotion = 'no-
   if (failAssets) await page.route('**/brand/onboarding-mascot/**', route => route.abort());
   await page.addInitScript(({ defaults, ready, cloakReady, theme }) => {
     let prefs = { ...defaults, onboardingDone: false, tutorialDone: false, theme };
-    let runtime = { ready, cloakReady, installing: false, progress: ready || cloakReady ? 1 : 0,
+    let runtime = { ready, depthModelsReady:ready, cloakReady, installing: false, progress: ready || cloakReady ? 1 : 0,
       message: 'UI test only — no real installs' };
     const callbacks = new Set();
     const mock = { calls: [], installs: [], prefs: () => prefs, runtime: () => runtime, finish: null,
@@ -52,7 +52,7 @@ async function fixture({ ready = false, cloakReady = false, reducedMotion = 'no-
         mock.installs.push(scope);
         mock.emit({ installing: true, error: undefined, progress: .02, message: '필요한 구성 확인 중' });
         return new Promise(resolve => { mock.finish = success => {
-          mock.emit(success ? { ready: scope === 'depth' || runtime.ready, cloakReady: true,
+          mock.emit(success ? { ready: scope === 'depth' || runtime.ready, depthModelsReady:scope==='depth'||runtime.depthModelsReady, cloakReady: true,
             installing: false, progress: 1, error: undefined, message: '검증 완료' }
             : { installing: false, error: '테스트 연결 오류', message: '다시 시도할 수 있습니다.' });
           resolve(runtime);
@@ -60,6 +60,7 @@ async function fixture({ ready = false, cloakReady = false, reducedMotion = 'no-
       },
       getSystem: async () => ({ cuda: false, gpu: 'TEST', vramGB: 0, freeVramGB: 0,
         torch: 'TEST', python: '3.13', ffmpeg: true }),
+      getModelCatalog:async()=>({basicReady:runtime.depthModelsReady,models:['image-small','video-small','alpha-fast','alpha-advanced','normal','appearance'].map(id=>({id,name:id,ready:runtime.depthModelsReady||!id.endsWith('small'),builtin:id.endsWith('small'),repo:'UI MOCK',revision:'mock',license:'mock'}))}),downloadModel:async()=>{throw new Error('Unexpected model download in mascot UI test');},cancelModelDownload:async()=>{},onModelProgress:()=>()=>{},getUpdateStatus:async()=>({status:'idle'}),downloadUpdate:async()=>{},preparePlayback:async({path})=>({path,proxy:false,cached:true}),cancelPlayback:async()=>{},onPlaybackProgress:()=>()=>{},
       onProgress: () => () => {}, onUpdate: () => () => {}, onCloakProgress: () => () => {},
       chooseVideo: async () => { mock.calls.push('choose'); return null; },
       chooseCloakFiles: async () => { mock.calls.push('cloak-choose'); return []; },

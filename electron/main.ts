@@ -6,8 +6,11 @@ import crypto from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {RuntimeManager} from './runtime';
 import {PythonWorker} from './worker';
+import {createMediaProtocolHandler} from './media-protocol';
+import {MediaPlaybackManager} from './media-playback';
+import {UpdateManager} from './update-manager';
 import {requireLocalPath,safeAssetPath,sanitizeOptions,sanitizeCloakOptions,sanitizePreferences} from './policy';
-import type {Preferences,UpdateStatus} from '../shared/contracts';
+import {downloadModelIds, type DownloadModelId, type ModelCatalog, type ModelDownloadProgress, type Preferences, type UpdateStatus} from '../shared/contracts';
 
 protocol.registerSchemesAsPrivileged([
   {scheme:'depthdesk',privileges:{standard:true,secure:true,supportFetchAPI:true}},
@@ -20,6 +23,9 @@ let window:BrowserWindow;
 let runtime:RuntimeManager;
 let worker:PythonWorker|undefined;
 let cloakWorker:PythonWorker|undefined;
+let modelWorker:PythonWorker|undefined;
+let modelJob:{jobId:string;modelId:DownloadModelId}|undefined;
+let modelCatalog:ModelCatalog={basicReady:false,models:downloadModelIds.map(id=>({id,name:id,ready:false,builtin:id==='image-small'||id==='video-small',repo:'',revision:'',license:'',reason:'AI 엔진 준비 후 로컬 모델 상태를 확인합니다.'}))};
 let workerFingerprint='';
 let cloakWorkerFingerprint='';
 let runtimePreparing=false;
@@ -28,6 +34,7 @@ let allowExit=false;
 const activeJobs=new Set<string>();
 const cancelledJobs=new Set<string>();
 const allowedMedia=new Set<string>();
+let playbackManager:MediaPlaybackManager;
 const packaged=app.isPackaged;
 const root=app.getAppPath();
 const assets=packaged?path.join(process.resourcesPath,'runtime-assets'):path.join(root,'resources');
@@ -78,11 +85,44 @@ async function engine(scope:'depth'|'cloak'='depth'){
   return worker;
 }
 async function stopWorkers(){
-  const previous=worker,previousCloak=cloakWorker;
+  const previous=worker,previousCloak=cloakWorker,previousModels=modelWorker;
   // Both modules share one Python installation. Neither may retain DLL locks.
-  await Promise.all([previous?.stop(),previousCloak?.stop()]);
+  await Promise.all([previous?.stop(),previousCloak?.stop(),previousModels?.stop(),playbackManager?.stop()]);
   if(worker===previous){worker=undefined;workerFingerprint='';}
   if(cloakWorker===previousCloak){cloakWorker=undefined;cloakWorkerFingerprint='';}
+  if(modelWorker===previousModels)modelWorker=undefined;
+}
+function modelsEngine(){
+  if(!runtime.mediaTools)throw new Error('먼저 AI 엔진 준비를 완료해 주세요.');
+  modelWorker??=new PythonWorker({python:runtime.pythonPath,backend,models:runtime.modelsDir,
+    ffmpeg:runtime.mediaTools.ffmpeg,ffprobe:runtime.mediaTools.ffprobe,logs:path.join(app.getPath('userData'),'logs'),daemonEntry:'model_daemon.py'},event=>{
+      const progress=event as ModelDownloadProgress;
+      send('models:progress',progress);
+      if(runtimePreparing&&modelJob)runtime.reportModelSetup(progress.progress,progress.message);
+    });
+  return modelWorker;
+}
+async function getModelCatalog():Promise<ModelCatalog>{
+  if(modelJob||runtimePreparing)return {...modelCatalog,...(modelJob?{busy:modelJob}:{})};
+  const state=await runtime.inspect();
+  if(!state.cloakReady)return {...modelCatalog,basicReady:false,models:modelCatalog.models.map(item=>({...item,ready:false,reason:'먼저 AI 엔진 준비를 완료해 주세요.'}))};
+  if(runtimePreparing||modelJob)return {...modelCatalog,...(modelJob?{busy:modelJob}:{})};
+  modelCatalog=await modelsEngine().request<ModelCatalog>(crypto.randomUUID(),'catalog',{});
+  runtime.setDepthModelsReady(modelCatalog.basicReady);
+  return {...modelCatalog};
+}
+async function downloadModel(request:any,setup=false):Promise<ModelCatalog>{
+  if(!request||typeof request.jobId!=='string'||!request.jobId||request.jobId.length>100||!downloadModelIds.includes(request.modelId))throw new Error('잘못된 모델 다운로드 요청입니다.');
+  if(modelJob||activeJobs.size||(!setup&&(runtimePreparing||runtime.status.installing)))throw new Error('진행 중인 작업을 완료하거나 취소한 뒤 모델을 다운로드해 주세요.');
+  modelJob={jobId:request.jobId,modelId:request.modelId};activeJobs.add(request.jobId);
+  try{
+    const state=setup?runtime.status:await runtime.inspect();
+    if(!state.ready)throw new Error('모델 다운로드 전에 MagiDepth AI 엔진을 준비해 주세요.');
+    if(cancelledJobs.has(request.jobId))throw new Error('모델 다운로드가 취소되었습니다.');
+    modelCatalog=await modelsEngine().request<ModelCatalog>(request.jobId,'download',{modelId:request.modelId});
+    runtime.setDepthModelsReady(modelCatalog.basicReady);
+    return {...modelCatalog};
+  }finally{activeJobs.delete(request.jobId);cancelledJobs.delete(request.jobId);modelJob=undefined;}
 }
 async function installRuntime(scope:unknown){
   if(activeJobs.size)throw new Error('작업이 끝난 뒤 엔진을 준비해 주세요.');
@@ -92,7 +132,15 @@ async function installRuntime(scope:unknown){
     await stopWorkers();
     // A pending file validation may have registered a job while workers stopped.
     if(activeJobs.size)throw new Error('작업이 끝난 뒤 엔진을 준비해 주세요.');
-    return await(scope==='cloak'?runtime.installCloak():runtime.install());
+    const state=await(scope==='cloak'?runtime.installCloak():runtime.install());
+    if(scope!=='cloak'&&state.ready){
+      runtime.reportModelSetup(0,'MagiDepth 기본 이미지·영상 모델을 준비합니다. 기존 검증된 모델은 재사용합니다.');
+      try{
+        for(const modelId of ['image-small','video-small'] as const)await downloadModel({jobId:crypto.randomUUID(),modelId},true);
+        runtime.reportModelSetup(1,'MagiDepth 엔진과 기본 이미지·영상 모델 준비 완료.',true);
+      }catch(error){runtime.reportModelSetup(0,'기본 모델 준비가 완료되지 않았습니다. 모델 관리에서 다시 시도해 주세요.',false,error instanceof Error?error.message:String(error));}
+    }
+    return {...runtime.status};
   }finally{runtimePreparing=false;}
 }
 function handle(channel:string,fn:(...args:any[])=>unknown){
@@ -169,6 +217,30 @@ function setupIPC(){
     return null;
   });
   handle('video:probe',async p=>{const file=await sourcePath(p);return(await engine()).request(crypto.randomUUID(),'probe',{path:file});});
+  handle('media:prepare-playback',async request=>{
+    if(!request||typeof request.jobId!=='string'||!/^[\w-]{1,100}$/.test(request.jobId))throw new Error('Invalid playback job');
+    if(activeJobs.size||runtimePreparing||runtime.status.installing)throw new Error('진행 중인 작업이 끝난 뒤 호환 미리보기를 준비해 주세요.');
+    activeJobs.add(request.jobId);
+    try{
+      const file=await sourcePath(request.path);
+      if(/\.(png|jpg|jpeg|webp|bmp|tif|tiff)$/i.test(file))throw new Error('호환 미리보기는 영상에만 필요합니다.');
+      const state=await runtime.inspect();
+      const ffmpeg=state.mediaTools?.ffmpeg;
+      if(!ffmpeg)throw new Error('먼저 실행 환경에서 FFmpeg를 준비해 주세요.');
+      if(cancelledJobs.has(request.jobId))throw new Error('미리보기 준비를 취소했습니다.');
+      // Probe source duration ourselves, never trust renderer-supplied paths or tools.
+      const info=await(await engine(state.ready?'depth':'cloak')).request<any>(crypto.randomUUID(),'probe',{path:file});
+      if(cancelledJobs.has(request.jobId))throw new Error('미리보기 준비를 취소했습니다.');
+      const result=await playbackManager.prepare({jobId:request.jobId,source:file,ffmpeg,duration:info.duration});
+      allowedMedia.add((await fs.realpath(result.path)).toLowerCase());
+      return result;
+    }finally{activeJobs.delete(request.jobId);cancelledJobs.delete(request.jobId);}
+  });
+  handle('media:cancel-playback',id=>{
+    if(typeof id!=='string'||!id.length||id.length>100)throw new Error('Invalid playback job');
+    if(activeJobs.has(id))cancelledJobs.add(id);
+    playbackManager.cancel(id);
+  });
   for(const command of ['preview','render'])handle(`depth:${command}`,async request=>{
     if(!request||typeof request.jobId!=='string'||request.jobId.length>100)throw new Error('Invalid job');
     if(runtimePreparing||runtime.status.installing)throw new Error('엔진을 준비 중입니다. 준비가 끝난 뒤 다시 시도해 주세요.');
@@ -196,38 +268,40 @@ function setupIPC(){
   handle('output:open-folder',async p=>{const folder=requireLocalPath(p||prefs.outputDir||app.getPath('videos'));if(!(await fs.stat(folder)).isDirectory())throw new Error('폴더가 아닙니다.');const error=await shell.openPath(folder);if(error)throw new Error(error);});
   handle('output:reveal',async p=>{const file=requireLocalPath(p);await fs.access(file);shell.showItemInFolder(file);});
   handle('runtime:get',()=>runtime.inspect());handle('runtime:install',installRuntime);
+  handle('models:catalog',getModelCatalog);handle('models:download',request=>downloadModel(request));
+  handle('models:cancel',async id=>{
+    if(typeof id!=='string'||id.length>100)throw new Error('Invalid model job');
+    if(modelJob?.jobId===id){cancelledJobs.add(id);if(modelWorker)await modelWorker.request(crypto.randomUUID(),'cancel',{jobId:id});}
+  });
   handle('system:get',async()=>{
     const state=await runtime.inspect();
     if(!state.ready)return {cuda:false,gpu:'MagiCloak · CPU',vramGB:0,freeVramGB:0,torch:'MagiDepth 엔진 준비 전',python:state.cloakReady?'3.13':'미설치',ffmpeg:!!state.mediaTools,mediaTools:state.mediaTools,appVersion:app.getVersion()};
     return {...await(await engine()).request<any>(crypto.randomUUID(),'system',{}),mediaTools:state.mediaTools,appVersion:app.getVersion()};
   });
   handle('update:check',()=>checkUpdates());
-  handle('update:install',()=>{if(activeJobs.size||runtime.status.installing)throw new Error('작업이 끝난 뒤 업데이트해 주세요.');allowExit=true;autoUpdater.quitAndInstall(false,true);});
+  handle('update:get',()=>updateManager.getStatus());
+  handle('update:download',()=>updateManager.download());
+  handle('update:install',()=>updateManager.install());
 }
-const update=(status:UpdateStatus)=>send('update:progress',status);
+let updateManager:UpdateManager;
 async function checkUpdates(){
-  if(!packaged){update({status:'up-to-date',message:'개발 빌드에서는 업데이트를 설치하지 않습니다.'});return;}
-  try{await autoUpdater.checkForUpdates();}catch(err){update({status:'error',message:err instanceof Error?err.message:String(err)});}
+  return updateManager.check();
 }
 function setupUpdates(){
-  autoUpdater.autoDownload=true;autoUpdater.autoInstallOnAppQuit=false;
-  autoUpdater.on('checking-for-update',()=>update({status:'checking'}));
-  autoUpdater.on('update-available',info=>update({status:'available',version:info.version}));
-  autoUpdater.on('update-not-available',info=>update({status:'up-to-date',version:info.version}));
-  autoUpdater.on('download-progress',info=>update({status:'downloading',percent:info.percent}));
-  autoUpdater.on('update-downloaded',info=>update({status:'ready',version:info.version}));
-  autoUpdater.on('error',err=>update({status:'error',message:err.message}));
-  if(prefs.autoUpdate)setTimeout(()=>void checkUpdates(),15000);
+  updateManager=new UpdateManager({updater:autoUpdater,packaged,autoDownload:()=>prefs.autoUpdate,
+    busy:()=>Boolean(activeJobs.size||runtimePreparing||runtime.status.installing||modelJob||playbackManager?.busy),
+    notify:status=>send('update:progress',status),beforeInstall:()=>{allowExit=true;}});
+  // Always check metadata on startup. The preference controls downloads only.
+  setTimeout(()=>void checkUpdates(),5000);
 }
 async function createWindow(){
   try{prefs=sanitizePreferences(JSON.parse(await fs.readFile(prefsPath,'utf8')));}catch{prefs=sanitizePreferences({});}
   runtime=new RuntimeManager(app.getPath('userData'),assets,backend,state=>send('runtime:progress',state),!packaged?process.env.DEPTHDESK_PYTHON:undefined);
+  playbackManager=new MediaPlaybackManager(path.join(app.getPath('userData'),'playback-cache'),event=>send('media:playback-progress',event));
   protocol.handle('depthdesk',async request=>{
     try{const url=new URL(request.url);if(url.host!=='app')return new Response('Forbidden',{status:403});const file=safeAssetPath(path.join(root,'dist'),url.pathname==='/'?'/index.html':decodeURIComponent(url.pathname));return net.fetch(pathToFileURL(file).toString());}catch{return new Response('Not found',{status:404});}
   });
-  protocol.handle('depthdesk-media',async request=>{
-    try{const url=new URL(request.url);if(url.host!=='local')return new Response('Forbidden',{status:403});const file=await fs.realpath(requireLocalPath(url.searchParams.get('path')));if(!allowedMedia.has(file.toLowerCase()))return new Response('Forbidden',{status:403});return net.fetch(pathToFileURL(file).toString(),{headers:request.headers});}catch{return new Response('Not found',{status:404});}
-  });
+  protocol.handle('depthdesk-media',createMediaProtocolHandler(allowedMedia));
   window=new BrowserWindow({width:1440,height:960,minWidth:1040,minHeight:720,backgroundColor:'#101113',title:'MagiMagic · 매지매직',autoHideMenuBar:true,show:false,icon:path.join(root,'dist','brand','magidepth.png'),webPreferences:{preload:path.join(__dirname,'preload.cjs'),nodeIntegration:false,contextIsolation:true,sandbox:true,webSecurity:true}});
   window.webContents.setWindowOpenHandler(()=>({action:'deny'}));
   window.webContents.on('will-navigate',(event,url)=>{if(url!=='depthdesk://app/index.html'&&!(devUrl&&new URL(url).origin===new URL(devUrl).origin))event.preventDefault();});
@@ -243,5 +317,5 @@ if(!lock)app.quit();else{
   app.on('second-instance',()=>{if(window){if(window.isMinimized())window.restore();window.focus();}});
   app.whenReady().then(createWindow).catch(err=>{dialog.showErrorBox('MagiMagic 시작 실패',String(err));app.quit();});
   app.on('window-all-closed',()=>app.quit());
-  app.on('before-quit',()=>{void stopWorkers().catch(()=>{});runtime?.stop();});
+  app.on('before-quit',()=>{for(const id of activeJobs)playbackManager?.cancel(id);void stopWorkers().catch(()=>{});runtime?.stop();});
 }

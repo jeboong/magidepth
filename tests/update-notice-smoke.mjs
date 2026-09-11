@@ -1,0 +1,47 @@
+// Headless, isolated UpdateNotice test. Uses a running Vite, no desktop app.
+import assert from 'node:assert/strict';
+import { mkdir } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+const { chromium } = await import(process.env.PLAYWRIGHT_PACKAGE ? pathToFileURL(resolve(process.env.PLAYWRIGHT_PACKAGE, 'index.mjs')).href : 'playwright');
+const browser = await chromium.launch({ headless: true, channel: 'chrome' });
+const page = await browser.newPage({ viewport: { width: 1440, height: 800 } });
+const errors = []; page.on('pageerror', error => errors.push(error.message));
+const output = resolve('.test-output/update-notice'); await mkdir(output, { recursive: true });
+const fixture = `${process.env.UI_TEST_URL || 'http://127.0.0.1:5184'}/tests/update-notice-harness.html`;
+try {
+  await page.goto(fixture); await page.getByRole('heading', { name: /UpdateNotice isolated/ }).waitFor();
+  const notice = page.getByRole('region', { name: 'MagiMagic 업데이트 알림' });
+  assert.equal(await notice.count(), 0);
+  const input = page.getByRole('textbox', { name: '계속 작업하기' }); await input.fill('작업 유지'); await input.focus();
+  await page.evaluate(() => window.__updateNoticeMock.setStatus({ status: 'available', version: '9.9.9' }));
+  await notice.waitFor(); assert.equal(await input.evaluate(element => document.activeElement === element), true);
+  assert.equal(await page.getByRole('dialog').count(), 0); assert.equal(await notice.getByRole('button', { name: '다운로드', exact: true }).isEnabled(), true);
+  await page.evaluate(() => Promise.all(document.getAnimations().map(animation => animation.finished.catch(() => {}))));
+  await page.screenshot({ path: resolve(output, 'available-dark.png') });
+  await notice.getByRole('button', { name: '다운로드', exact: true }).click();
+  await notice.getByRole('progressbar', { name: '업데이트 다운로드' }).waitFor();
+  await page.evaluate(() => window.__updateNoticeMock.progress(43.2));
+  await page.waitForFunction(() => document.querySelector('[aria-label="업데이트 다운로드"]')?.getAttribute('aria-valuenow') === '43');
+  assert.equal(await input.isEnabled(), true); assert.equal(await input.inputValue(), '작업 유지');
+  await page.evaluate(() => { window.__updateNoticeMock.setBlocked(true); window.__updateNoticeMock.finishDownload(); });
+  const install = notice.getByRole('button', { name: '다시 시작해 설치', exact: true }); await install.waitFor(); assert.equal(await install.isDisabled(), true);
+  assert.equal(await page.evaluate(() => window.__updateNoticeMock.installs), 0);
+  await page.evaluate(() => window.__updateNoticeMock.setBlocked(false)); await page.waitForFunction(() => !Array.from(document.querySelectorAll('button')).find(button => button.textContent.includes('다시 시작해 설치'))?.disabled);
+  await install.click(); assert.equal(await page.evaluate(() => window.__updateNoticeMock.installs), 1);
+  await notice.getByRole('button', { name: /업데이트 알림 나중에 보기/ }).click(); assert.equal(await notice.count(), 0);
+  await page.evaluate(() => window.__updateNoticeMock.setStatus({ status: 'available', version: '9.9.9' })); assert.equal(await notice.count(), 0);
+  await page.evaluate(() => window.__updateNoticeMock.setStatus({ status: 'available', version: '9.9.10' })); await notice.waitFor();
+  await page.evaluate(() => { window.__updateNoticeMock.rejectNext = true; }); await notice.getByRole('button', { name: '다운로드', exact: true }).click();
+  await notice.getByRole('alert').waitFor(); assert.match(await notice.getByRole('alert').innerText(), /FAKE DOWNLOAD ERROR/);
+  const retry = notice.getByRole('button', { name: '다운로드 재시도', exact: true }); assert.equal(await retry.isEnabled(), true);
+  await retry.click(); await notice.getByRole('progressbar').waitFor(); await page.evaluate(() => window.__updateNoticeMock.finishDownload()); await install.waitFor();
+  assert.equal(await page.evaluate(() => window.__updateNoticeMock.downloads), 3); assert.equal(await page.evaluate(() => window.__updateNoticeMock.installs), 1);
+  await page.setViewportSize({ width: 1040, height: 720 }); await page.evaluate(() => document.documentElement.classList.remove('dark'));
+  await page.evaluate(() => Promise.all(document.getAnimations().map(animation => animation.finished.catch(() => {}))));
+  await page.screenshot({ path: resolve(output, 'ready-light-compact.png') });
+  const box = await notice.boundingBox(); assert.ok(box.x >= 0 && box.x + box.width <= 1040);
+  const clipped = await notice.evaluate(element => element.scrollWidth > element.clientWidth); assert.equal(clipped, false);
+  assert.deepEqual(errors, []);
+  console.log('PASS UpdateNotice available → download progress → ready, blocked installation, session/version dismissal, download error/retry, no autofocus/modal, light compact layout. No real downloads/installs.');
+} finally { await browser.close(); }

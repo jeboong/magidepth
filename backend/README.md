@@ -1,16 +1,32 @@
 # Local depth worker
 
 Run `python -u backend/daemon.py` with the installed private runtime. No HTTP
-server is started and no video is uploaded. Model files are downloaded only
-from pinned official Hugging Face URLs; checkpoint SHA-256 is verified.
+server is started and no video is uploaded. Inference resolves prepared local
+models only and raises `MODEL_DOWNLOAD_REQUIRED:<id>` when one is missing.
+Downloads occur exclusively through the explicit model action or Depth's
+initial setup, using pinned official Hugging Face URLs and SHA-256 verification.
 
 Environment: `FFMPEG_PATH`, `FFPROBE_PATH`, `DEPTHDESK_MODELS_DIR`.
 Requests are one UTF-8 JSON object per line: `{id, command, payload}`.
 Commands: `system`, `probe` (`{path}`), `preview`, `render`, `cancel` (`{jobId}`).
 Results: `{id,type:"result",data}`; errors: `{id,type:"error",error}`;
 progress: `{id,type:"progress",data:{jobId,stage,progress,message,...}}`.
-Wire progress is 0–1 within its named stage; downloads precede inference.
+Wire progress is 0–1 within its named stage; inference never initiates downloads.
 The main stdin loop can cancel jobs while the single inference worker is busy.
+
+`backend/model_daemon.py` is a separate, non-GPU JSON worker with `catalog`,
+`download` (`{modelId}`), and `cancel` (`{jobId}`) commands. Catalog requests use
+local immutable-revision files only; they never access the network. Completed
+app and exact-revision Hugging Face caches are reused after integrity checks.
+Partial or mismatched revisions do not count as ready. Hash checks are cached
+against file path/size/mtime while the worker lives, and missing/changed files
+invalidate readiness. Download cancellation removes only its partial file;
+existing final cache files remain intact until a verified replacement is ready.
+
+Depth setup explicitly prepares `image-small` and `video-small`. Optional
+models are `alpha-fast`, `alpha-advanced`, `normal`, and `appearance`. Fast RGB
+and material approximations require none; fast normals reuse the selected
+Depth model. Engine readiness and the two basic models' readiness are distinct.
 
 ## Rendering
 
@@ -64,6 +80,7 @@ in frame order; all outputs preserve the same trimmed frame count.
 
 `python -m unittest discover -s backend/tests -v` runs offline logic tests.
 `python backend/smoke.py --input VIDEO --output-dir SCRATCH --model image-small`
-runs an explicit real inference/preview/cache/export benchmark. It downloads
-weights on first use. Never put personal test footage or generated outputs in
-the public source repository.
+runs an explicit real inference/preview/cache/export benchmark. Prepare its
+selected model with the explicit model action first; benchmarks do not silently
+download missing weights. Never put personal test footage or generated outputs
+in the public source repository.

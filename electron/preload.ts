@@ -11,8 +11,10 @@ const api:DepthDeskAPI={
   onCloakProgress:cb=>subscribe('cloak:progress',cb),
   pasteClipboardImage:()=>ipcRenderer.invoke('image:paste'),
   probeVideo:p=>ipcRenderer.invoke('video:probe',p),preview:p=>ipcRenderer.invoke('depth:preview',p),render:p=>ipcRenderer.invoke('depth:render',p),cancelJob:id=>ipcRenderer.invoke('depth:cancel',id),
+  preparePlayback:p=>ipcRenderer.invoke('media:prepare-playback',p),cancelPlayback:id=>ipcRenderer.invoke('media:cancel-playback',id),onPlaybackProgress:cb=>subscribe('media:playback-progress',cb),
+  getModelCatalog:()=>ipcRenderer.invoke('models:catalog'),downloadModel:p=>ipcRenderer.invoke('models:download',p),cancelModelDownload:id=>ipcRenderer.invoke('models:cancel',id),onModelProgress:cb=>subscribe('models:progress',cb),
   chooseOutputDir:()=>ipcRenderer.invoke('output:choose-dir'),chooseSavePath:p=>ipcRenderer.invoke('output:save-as',p),openFolder:p=>ipcRenderer.invoke('output:open-folder',p),revealFile:p=>ipcRenderer.invoke('output:reveal',p),
-  getRuntime:()=>ipcRenderer.invoke('runtime:get'),installRuntime:scope=>ipcRenderer.invoke('runtime:install',scope),getSystem:()=>ipcRenderer.invoke('system:get'),checkForUpdates:()=>ipcRenderer.invoke('update:check'),installUpdate:()=>ipcRenderer.invoke('update:install'),
+  getRuntime:()=>ipcRenderer.invoke('runtime:get'),installRuntime:scope=>ipcRenderer.invoke('runtime:install',scope),getSystem:()=>ipcRenderer.invoke('system:get'),checkForUpdates:()=>ipcRenderer.invoke('update:check'),getUpdateStatus:()=>ipcRenderer.invoke('update:get'),downloadUpdate:()=>ipcRenderer.invoke('update:download'),installUpdate:()=>ipcRenderer.invoke('update:install'),
   onProgress:cb=>subscribe('depth:progress',cb),onRuntime:cb=>subscribe('runtime:progress',cb),onUpdate:cb=>subscribe('update:progress',cb),
 };
 contextBridge.exposeInMainWorld('depthdesk',api);

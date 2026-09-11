@@ -135,29 +135,9 @@ def _sha256(file: Path, check: Check) -> str:
 
 
 def _snapshot(key: str, progress: Progress, check: Check) -> str:
-    from huggingface_hub import snapshot_download
-
-    spec = MODEL_SPECS[key]
-    check()
-    progress("model", 3, f"{spec['repo']} · 최초 사용 시 모델 다운로드 ({spec['license']})")
-    patterns = list(spec["weights"])
-    if "code" in spec:
-        patterns += list(spec["code"]) + ["README.md"]
-    else:
-        patterns += ["model_index.json", "*/config.json", "scheduler/scheduler_config.json", "tokenizer/*", "README.md"]
-    folder = snapshot_download(repo_id=spec["repo"], revision=spec["revision"], allow_patterns=patterns, max_workers=2)
-    check()
-    identity = (key, str(folder))
-    if identity not in _VERIFIED:
-        # Verify safetensors and every executable/config file before enabling
-        # BiRefNet's custom architecture. Never execute a moving main branch.
-        expected = {**spec["weights"], **spec.get("code", {})}
-        for index, (relative, checksum) in enumerate(expected.items()):
-            progress("model", 4 + 8 * index / len(expected), f"모델 무결성 검사 · {relative}")
-            if _sha256(Path(folder) / relative, check) != checksum:
-                raise RuntimeError(f"모델 파일 SHA-256이 일치하지 않습니다: {spec['repo']}/{relative}. 모델 캐시를 확인하세요.")
-        _VERIFIED.add(identity)
-    return str(folder)
+    from model_catalog import require_model
+    progress('model', 3, '준비된 로컬 모델의 무결성을 확인합니다.')
+    return str(require_model(key, check))
 
 
 def _precision(options: dict[str, Any], device: str) -> str:

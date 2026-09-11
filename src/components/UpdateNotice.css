@@ -1,0 +1,17 @@
+.update-notice{display:flex;align-items:center;gap:14px;flex:0 0 auto;position:relative;z-index:20;margin:12px 24px 0;padding:14px 16px;border:1px solid hsl(var(--primary)/.27);border-radius:14px;background:linear-gradient(115deg,hsl(var(--primary)/.065),hsl(var(--popover)) 60%);color:hsl(var(--foreground));box-shadow:0 5px 22px #00000006;animation:update-notice-arrive .2s ease-out}
+.update-notice-icon{display:flex;align-items:center;justify-content:center;width:38px;height:38px;flex-shrink:0;border-radius:12px;background:hsl(var(--primary)/.12);color:hsl(var(--primary))}
+.update-notice-copy{flex:1;min-width:0}
+.update-notice-heading{display:flex;align-items:center;gap:9px}
+.update-notice-heading strong{font-size:13px;font-weight:650;letter-spacing:-.3px}
+.update-notice-heading>span{padding:2px 6px;border-radius:5px;background:hsl(var(--primary)/.12);font-size:10px;font-weight:600;color:hsl(var(--primary));font-variant-numeric:tabular-nums}
+.update-notice-copy p{margin:4px 0 0;font-size:11px;line-height:1.6;color:hsl(var(--muted-foreground));overflow-wrap:anywhere}
+.update-notice-actions{display:flex;align-items:center;gap:5px;flex-shrink:0}
+.update-notice-progress-row{display:flex;align-items:center;gap:8px;max-width:320px;margin-top:8px;font-size:10px;color:hsl(var(--muted-foreground));font-variant-numeric:tabular-nums}
+.update-notice-progress{height:4px;flex:1;overflow:hidden;border-radius:4px;background:hsl(var(--primary)/.12)}
+.update-notice-progress>span{display:block;height:100%;border-radius:inherit;background:hsl(var(--primary));transition:width .2s linear}
+.update-notice-copy p.update-notice-error{color:hsl(var(--destructive));margin-top:7px}
+.update-notice-spin{animation:update-notice-spin .9s linear infinite}
+@keyframes update-notice-spin{to{transform:rotate(360deg)}}
+@keyframes update-notice-arrive{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:1100px){.update-notice{margin:10px 16px 0;gap:10px;padding:12px}.update-notice-copy p{font-size:10px}.update-notice-actions{gap:2px}}
+@media(prefers-reduced-motion:reduce){.update-notice,.update-notice-spin{animation:none}.update-notice-progress>span{transition:none}}

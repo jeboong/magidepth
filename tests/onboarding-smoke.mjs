@@ -19,13 +19,14 @@ async function fixture({ready=false,cloakReady=false,done=false,theme='dark',wid
   await page.addInitScript(({defaults,ready,cloakReady,done,theme})=>{
     let prefs=JSON.parse(localStorage.getItem('onboard-fixture-prefs')||JSON.stringify({...defaults,onboardingDone:done,tutorialDone:false,theme}));
     const callbacks=new Set();
-    let runtime={ready,cloakReady,installing:false,progress:ready||cloakReady?1:0,message:'테스트 환경 · 실제 설치 없음'};
+    let runtime={ready,depthModelsReady:ready,cloakReady,installing:false,progress:ready||cloakReady?1:0,message:'테스트 환경 · 실제 설치 없음'};
     const mock={calls:[],installs:[],prefs:()=>prefs,runtime:()=>runtime,finish:null,emit:update=>{runtime={...runtime,...update};for(const callback of callbacks)callback({...runtime});}};
     window.__onboardingMock=mock;
     window.depthdesk={
       getPreferences:async()=>prefs,setPreferences:async update=>{prefs={...prefs,...update};localStorage.setItem('onboard-fixture-prefs',JSON.stringify(prefs));mock.calls.push('preferences');return prefs;},
       getRuntime:async()=>runtime,onRuntime:callback=>{callbacks.add(callback);return()=>callbacks.delete(callback);},
-      installRuntime:scope=>{mock.installs.push(scope);mock.emit({installing:true,error:undefined,progress:.02,message:'필요한 구성 확인 중'});return new Promise(resolve=>{mock.finish=success=>{mock.emit(success?{ready:scope==='depth'||runtime.ready,cloakReady:true,installing:false,progress:1,error:undefined,message:'검증 완료'}:{installing:false,error:'테스트 연결 오류',message:'다시 시도할 수 있습니다.'});resolve(runtime);};});},
+      installRuntime:scope=>{mock.installs.push(scope);mock.emit({installing:true,error:undefined,progress:.02,message:'필요한 구성 확인 중'});return new Promise(resolve=>{mock.finish=success=>{mock.emit(success?{ready:scope==='depth'||runtime.ready,depthModelsReady:scope==='depth'||runtime.depthModelsReady,cloakReady:true,installing:false,progress:1,error:undefined,message:'검증 완료'}:{installing:false,error:'테스트 연결 오류',message:'다시 시도할 수 있습니다.'});resolve(runtime);};});},
+      getModelCatalog:async()=>({basicReady:runtime.depthModelsReady,models:['image-small','video-small','alpha-fast','alpha-advanced','normal','appearance'].map(id=>({id,name:id,ready:runtime.depthModelsReady||!id.endsWith('small'),builtin:id.endsWith('small'),repo:'UI MOCK',revision:'mock',license:'mock'}))}),downloadModel:async()=>{throw new Error('Unexpected model download in onboarding UI test');},cancelModelDownload:async()=>{},onModelProgress:()=>()=>{},getUpdateStatus:async()=>({status:'idle'}),downloadUpdate:async()=>{},preparePlayback:async({path})=>({path,proxy:false,cached:true}),cancelPlayback:async()=>{},onPlaybackProgress:()=>()=>{},
       getSystem:async()=>({cuda:false,gpu:'TEST',vramGB:0,freeVramGB:0,torch:'TEST',python:'3.13',ffmpeg:true}),
       onProgress:()=>()=>{},onUpdate:()=>()=>{},onCloakProgress:()=>()=>{},
       chooseVideo:async()=>{mock.calls.push('choose');return null;},chooseCloakFiles:async()=>{mock.calls.push('cloak-choose');return[];},pasteClipboardImage:async()=>{mock.calls.push('paste');return null;},
@@ -77,7 +78,7 @@ try{
   await check('missing Depth explains cost/deferred models; later opens workspace without install',async()=>{
     const page=await fixture();await half(page,'depth').click();await page.getByTestId('onboarding-next').click();
     await page.getByText('MagiMagic 사용을 위해 최초 1회 셋업이 필요합니다. 인터넷 환경과 PC 성능에 따라 수십 분 이상 소요될 수 있습니다.',{exact:true}).waitFor();
-    await page.getByText('깊이·고급 AI 모델은 해당 모델을 처음 사용할 때 별도로 다운로드됩니다.',{exact:false}).waitFor();await screenshot(page,'06-depth-setup');
+    await page.getByText('Alpha·고급 Normal·재질 AI 모델은 추출할 맵에서 다운로드 버튼을 눌러 준비합니다.',{exact:false}).waitFor();await screenshot(page,'06-depth-setup');
     await page.getByRole('button',{name:'나중에 준비',exact:true}).click();await page.locator('.onboarding-modal').waitFor({state:'hidden'});assert.equal((await prefs(page)).onboardingDone,true);assert.deepEqual(await page.evaluate(()=>window.__onboardingMock.installs),[]);await page.close();
   });
   await check('lightweight Cloak setup progress, failure, retry and success open workspace',async()=>{

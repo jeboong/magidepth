@@ -48,7 +48,7 @@ export function Onboarding({open,initialSelection,runtime,browserDemo=false,reop
     // Focus follows page changes, not each pointer selection.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   },[open,step]);
-  const ready=selection==='cloak'?!!runtime.cloakReady:selection==='depth'&&runtime.ready;
+  const ready=selection==='cloak'?!!runtime.cloakReady:selection==='depth'&&runtime.ready&&runtime.depthModelsReady===true;
   const installing=runtime.installing||installPending;
   const selected=selection?modules[selection]:null;
   const percent=Math.round(Math.max(0,Math.min(1,Number.isFinite(runtime.progress)?runtime.progress:0))*100);
@@ -71,7 +71,7 @@ export function Onboarding({open,initialSelection,runtime,browserDemo=false,reop
     pending.current=true;setInstallPending(true);setLocalError('');
     try{
       const result=await onInstall(selection);
-      if(!(selection==='cloak'?result.cloakReady:result.ready)&&!result.installing)setLocalError(result.error||'셋업이 완료되지 않았습니다. 상태를 확인하고 다시 시도해 주세요.');
+      if(!(selection==='cloak'?result.cloakReady:result.ready&&result.depthModelsReady)&&!result.installing)setLocalError(result.error||'셋업이 완료되지 않았습니다. 상태를 확인하고 다시 시도해 주세요.');
     }catch(error){setLocalError(errorMessage(error));}
     finally{pending.current=false;setInstallPending(false);}
   };
@@ -118,7 +118,7 @@ export function Onboarding({open,initialSelection,runtime,browserDemo=false,reop
         </>:<>
           <div className="onboarding-setup-summary">
             <div className="onboarding-setup-icon">{ready&&!installing?<CheckCircle2 size={30}/>:installing?<LoaderCircle size={30} className="animate-spin"/>:<Download size={30}/>}</div>
-            <div><h3>{selection==='cloak'?'MagiCloak · 경량 기본 도구':'MagiDepth · AI 실행 환경'}</h3><p>{selection==='cloak'?'전용 Python, NumPy, OpenCV를 준비합니다. PyTorch/CUDA는 설치하지 않습니다.':'PyTorch/CUDA와 맵 추정 라이브러리를 준비합니다. 대용량 다운로드와 충분한 저장 공간이 필요합니다.'}</p><p>{selection==='cloak'?'얼굴 검출 모델은 해당 기능을 처음 사용할 때 별도로 준비될 수 있습니다.':'깊이·고급 AI 모델은 해당 모델을 처음 사용할 때 별도로 다운로드됩니다. 지금 모든 모델을 받지는 않습니다.'}</p></div>
+            <div><h3>{selection==='cloak'?'MagiCloak · 경량 기본 도구':'MagiDepth · AI 실행 환경 + 기본 깊이 모델'}</h3><p>{selection==='cloak'?'전용 Python, NumPy, OpenCV를 준비합니다. PyTorch/CUDA는 설치하지 않습니다.':'PyTorch/CUDA와 기본 이미지·영상 Depth 모델을 함께 준비합니다. 대용량 다운로드와 충분한 저장 공간이 필요합니다.'}</p><p>{selection==='cloak'?'얼굴 검출 모델은 해당 기능을 처음 사용할 때 별도로 준비될 수 있습니다.':'Alpha·고급 Normal·재질 AI 모델은 추출할 맵에서 다운로드 버튼을 눌러 준비합니다. 필요 없는 모델은 받지 않습니다.'}</p></div>
           </div>
           <div className="onboarding-setup-notes"><p><Check size={14}/>이미 사용할 수 있는 FFmpeg·엔진은 검증 후 재사용합니다.</p><p><ShieldCheck size={14}/>설치는 앱 전용 공간에 진행하며, 영상은 외부로 업로드하지 않습니다.</p>{selection==='depth'&&<p><Download size={14}/>기본 12 GB, 고급 AI 사용 시 25 GB 이상의 여유 공간을 권장합니다.</p>}</div>
           {installing&&<div className="onboarding-install-progress"><div><span>엔진 셋업</span><strong>{percent}%</strong></div><div className="onboarding-progress-track" role="progressbar" aria-label="엔진 준비 진행률" aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><i style={{width:`${percent}%`}}/></div><p role="status">{runtime.message||'필요한 구성 요소를 확인하고 있습니다.'}</p></div>}
