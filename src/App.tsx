@@ -72,6 +72,7 @@ import { VideoTrimEditor } from "./components/VideoTrimEditor";
 import { useModelDownloads } from "./lib/useModelDownloads";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { useVideoPlayback } from "./lib/useVideoPlayback";
+import { withDeadline } from "./lib/asyncDeadline";
 import "./components/MapSelection.css";
 
 type ViewMode = "compare" | "source" | "depth";
@@ -190,7 +191,7 @@ export default function App() {
     let systemReadinessKey = "";
     const loadSystem = (status: RuntimeStatus) => {
       const key = `${status.ready}:${!!status.cloakReady}`;
-      if (systemReadinessKey === key || !alive) return;
+      if (status.installing || systemReadinessKey === key || !alive) return;
       systemReadinessKey = key;
       // getSystem itself inspects the engine and emits runtime status. Do not turn
       // that readiness event into a recursive getSystem IPC loop.
@@ -199,24 +200,34 @@ export default function App() {
         .then((value) => {
           if (alive) setSystem(value);
         })
-        .catch(() => {});
+        .catch(() => {
+          // A setup-time busy response must not suppress the next ready event.
+          if (alive && systemReadinessKey === key) systemReadinessKey = "";
+        });
     };
-    Promise.all([api.getPreferences(), api.getRuntime()])
-      .then(([p, r]) => {
+    withDeadline(api.getPreferences(), 30_000, "저장된 설정을 읽는 시간이 초과되었습니다. 앱을 다시 열어 주세요. 기존 설정은 삭제하지 않았습니다.")
+      .then((p) => {
         if (!alive) return;
         setPrefs(p);
         setWorkspace(p.startupWorkspace === "cloak" ? "cloak" : "depth");
         setOnboarding(!p.onboardingDone);
-        setRuntime(r);
         setLoaded(true);
-        if (r.ready || r.cloakReady) loadSystem(r);
         if (p.onboardingDone && !p.tutorialDone && p.startupWorkspace !== "cloak" && !isBrowserDemo) setTutorial(true);
       })
       .catch((e) => {
+        if (!alive) return;
         setError(errorMessage(e));
         setLoaded(true);
         setOnboarding(true);
       });
+    // A failed preference read must not discard a successful engine check.
+    withDeadline(api.getRuntime(), 135_000, "실행 환경 확인 시간이 초과되었습니다. 기존 설치는 유지됩니다. 잠시 후 설치 / 다시 시도를 눌러 주세요.")
+      .then(r => {
+        if (!alive) return;
+        setRuntime(r);
+        if (r.ready || r.cloakReady) loadSystem(r);
+      })
+      .catch(e => { if (alive) setError(errorMessage(e)); });
     const offRuntime = api.onRuntime((r) => {
       setRuntime(r);
       if (r.ready || r.cloakReady) loadSystem(r);

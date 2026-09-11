@@ -25,7 +25,7 @@ async function fixture(){
   const handlers=new Map(),created=[],events=[],dialogs=[];
   const paths={appData:dir,userData:path.join(dir,'MagiDepth'),videos:dir};
   const electron={
-    app:{getPath:key=>paths[key],setPath:(key,value)=>{paths[key]=value;},setName:()=>{},getAppPath:()=>path.resolve('.'),isPackaged:false,requestSingleInstanceLock:()=>false,quit:()=>{}},
+    app:{getPath:key=>paths[key],setPath:(key,value)=>{paths[key]=value;},setName:()=>{},getAppPath:()=>path.resolve('.'),getVersion:()=>'test',isPackaged:false,requestSingleInstanceLock:()=>false,quit:()=>{}},
     protocol:{registerSchemesAsPrivileged:()=>{}},ipcMain:{handle:(name,handler)=>handlers.set(name,handler)},
     dialog:{showSaveDialog:async(_window,options)=>{dialogs.push(options);return {canceled:false,filePath:path.join(dir,path.basename(options.defaultPath))};}},
   };
@@ -33,12 +33,12 @@ async function fixture(){
     busy=false; stopped=false;
     constructor(config){this.config=config;this.id=created.length;created.push(this);}
     async stop(){events.push(`stop:${this.id}`);if(this.stopGate)await this.stopGate;this.stopped=true;events.push(`closed:${this.id}`);}
-    async request(id,command,payload){events.push(`request:${this.id}:${command}`);if(command==='download'&&this.downloadGate)return this.downloadGate;if(command==='catalog'||command==='download')return {models:[],basicReady:true};return command==='render'?{outputs:payload.jobs?.map(job=>job.outputPath)||[]}:{};}
+    async request(id,command,payload,limits){events.push(`request:${this.id}:${command}`);this.lastLimits=limits;if(command==='download'&&this.downloadGate)return this.downloadGate;if(command==='catalog'&&this.catalogGate)return this.catalogGate;if(command==='system'&&this.systemGate)return this.systemGate;if(command==='catalog'||command==='download')return {models:[],basicReady:true};return command==='render'?{outputs:payload.jobs?.map(job=>job.outputPath)||[]}:{};}
   }
   const {__audit}=executeBundle(mainBundle.outputFiles[0].text,{electron,'electron-updater':{autoUpdater:{}},'./runtime':{RuntimeManager:class{}},'./worker':{PythonWorker:FakeWorker}},dir);
   const state={ready:true,cloakReady:true,installing:false},runtime={status:state,pythonPath:path.join(dir,'python.exe'),binDir:path.join(dir,'private-tools'),modelsDir:path.join(dir,'models'),mediaTools:{ffmpeg:path.join(dir,'Tool One','ffmpeg.exe'),ffprobe:path.join(dir,'Tool Two','ffprobe.exe')},inspect:async()=>state,install:async()=>{events.push('install:depth');return state;},installCloak:async()=>{events.push('install:cloak');return state;}};
   runtime.setDepthModelsReady=ready=>{state.depthModelsReady=ready;};
-  runtime.reportModelSetup=(progress,message,complete=false,error)=>{Object.assign(state,{progress,message,installing:!complete&&!error,depthModelsReady:complete,error});};
+  runtime.reportModelSetup=(progress,message,complete=false,error)=>{Object.assign(state,{progress,message,installing:!complete&&error===undefined,depthModelsReady:complete,error});};
   const window={webContents:{mainFrame:{url:'depthdesk://app/index.html'}}};
   __audit.init(runtime,window);__audit.setupIPC();
   const call=(name,...args)=>handlers.get(name)({sender:window.webContents,senderFrame:window.webContents.mainFrame},...args);
@@ -78,6 +78,45 @@ test('failed process shutdown aborts installation rather than risking locked DLL
   const f=await fixture(),worker=await f.audit.engine();worker.stop=async()=>{throw Error('still running');};
   await assert.rejects(f.audit.installRuntime('depth'),/still running/);assert.equal(f.events.includes('install:depth'),false);
 });
+
+test('runtime status during setup never launches an inspection that clears installing',async()=>{
+  const f=await fixture(),worker=await f.audit.engine();let release;
+  worker.stopGate=new Promise(resolve=>{release=resolve;});
+  const setup=f.audit.installRuntime('cloak');f.runtime.reportModelSetup(.2,'Preparing basics');
+  f.runtime.inspect=async()=>{throw Error('must preserve setup status');};
+  assert.equal((await f.call('runtime:get')).installing,true);
+  await assert.rejects(f.call('system:get'),/엔진을 준비 중/);
+  release();await setup;
+});
+
+test('simultaneous system-info callers share one worker request while unrelated jobs remain blocked',async()=>{
+  const f=await fixture(),worker=await f.audit.engine();let resolveSystem;
+  worker.systemGate=new Promise(resolve=>{resolveSystem=resolve;});
+  const queries=Array.from({length:40},()=>f.call('system:get'));
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.events.filter(event=>event.endsWith(':system')).length,1);assert.equal(f.audit.activeJobs.size,1);
+  await assert.rejects(f.call('depth:preview',{jobId:'blocked-render'}),/진행 중/);
+  await assert.rejects(f.audit.installRuntime('depth'),/작업이 끝난/);
+  resolveSystem({gpu:'Fixture GPU'});
+  const answers=await Promise.all(queries);assert.ok(answers.every(answer=>answer.gpu==='Fixture GPU'));assert.equal(f.audit.activeJobs.size,0);
+  worker.systemGate=undefined;
+  await f.call('system:get');assert.equal(f.events.filter(event=>event.endsWith(':system')).length,2);
+  f.audit.activeJobs.add('real-render');await assert.rejects(f.call('system:get'),/작업이 끝난/);f.audit.activeJobs.clear();
+});
+
+test('system-info timeout releases job guard and an unusable worker is replaced before retry',async()=>{
+  const f=await fixture(),worker=await f.audit.engine();let rejectSystem;
+  worker.systemGate=new Promise((_resolve,reject)=>{rejectSystem=reject;});
+  const pending=f.call('system:get'),shared=f.call('system:get');
+  const handled=Promise.all([pending,shared].map(promise=>assert.rejects(promise,/system stalled/)));
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(worker.lastLimits.timeoutMs,60_000);assert.equal(f.audit.activeJobs.size,1);
+  await assert.rejects(f.call('depth:preview',{jobId:'unsafe-render'}),/진행 중/);
+  worker.unusable=true;const failure=new Error('system stalled');failure.name='WorkerTimeoutError';rejectSystem(failure);await handled;
+  assert.equal(f.audit.activeJobs.size,0);
+  assert.notEqual(await f.audit.engine(),worker);assert.equal(worker.stopped,true);
+  await f.call('system:get');assert.equal(f.audit.activeJobs.size,0);
+});
 test('Cloak save-as and render accept MP4 MOV MKV M4V; depth remains MP4 only',async()=>{
   const f=await fixture(),input=path.join(f.dir,'input.mp4');await fs.writeFile(input,'fixture');
   for(const ext of ['mp4','mov','mkv','m4v']){
@@ -94,6 +133,31 @@ test('model status uses a separate catalog worker and never queues a download',a
   assert.equal(result.basicReady,true);assert.equal(f.state.depthModelsReady,true);
   assert.equal(f.created[0].config.daemonEntry,'model_daemon.py');
   assert.equal(f.events.some(event=>event.endsWith(':download')),false);
+  assert.ok(f.created[0].lastLimits.timeoutMs>119_000&&f.created[0].lastLimits.timeoutMs<=120_000);
+});
+
+test('concurrent model status calls share one pending catalog and can refresh after failure',async()=>{
+  const f=await fixture();await f.call('models:catalog');const worker=f.created[0];let rejectCatalog;
+  worker.catalogGate=new Promise((_resolve,reject)=>{rejectCatalog=reject;});
+  const count=f.events.length;
+  const queries=Array.from({length:40},()=>f.call('models:catalog'));
+  const handled=Promise.all(queries.map(query=>assert.rejects(query,/hung catalog/)));
+  await Promise.resolve();await Promise.resolve();
+  assert.equal(f.events.slice(count).filter(event=>event.endsWith(':catalog')).length,1);
+  const failure=new Error('hung catalog');failure.name='WorkerTimeoutError';rejectCatalog(failure);await handled;
+  assert.equal(worker.stopped,true);assert.equal(f.state.depthModelsReady,false);
+  assert.equal((await f.call('models:catalog')).basicReady,true);assert.equal(f.created.length,2);
+});
+
+test('model download failure clears busy state and permits a fresh status request',async()=>{
+  const f=await fixture();await f.call('models:catalog');const worker=f.created[0];let rejectDownload;
+  worker.downloadGate=new Promise((_resolve,reject)=>{rejectDownload=reject;});
+  const request=f.call('models:download',{jobId:'stalled-download',modelId:'image-small'});
+  const handled=assert.rejects(request,/stalled model/);await Promise.resolve();await Promise.resolve();
+  assert.equal(worker.lastLimits.idleTimeoutMs,300_000);
+  const failure=new Error('stalled model');failure.name='WorkerTimeoutError';rejectDownload(failure);await handled;
+  assert.equal(f.audit.activeJobs.size,0);assert.equal((await f.call('models:catalog')).busy,undefined);
+  assert.equal(f.created.length,2);
 });
 
 test('explicit model download rejects unknown IDs and cannot bypass active-job guards through extra IPC arguments',async()=>{

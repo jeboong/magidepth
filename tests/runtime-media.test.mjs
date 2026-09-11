@@ -168,3 +168,25 @@ test('existing Cloak environment upgrades to Depth without re-extracting Python'
 test('concurrent repeated installation is single-flight',async()=>{
   const f=await runtimeFixture({full:false,cloak:false});await Promise.all([f.manager.installCloak(),f.manager.installCloak(),f.manager.installCloak()]);assert.equal(f.calls.filter(args=>args[0]==='-m').length,1);
 });
+
+test('hung inspection releases single-flight state and late results cannot overwrite a successful retry',async()=>{
+  const f=await runtimeFixture();f.manager.dependencies.inspectTimeoutMs=100;
+  let release;f.manager.resolver.discover=()=>new Promise(resolve=>{release=resolve;});
+  const state=await f.manager.inspect(true);assert.equal(state.ready,false);assert.equal(state.installing,false);assert.match(state.error,/확인 시간이 초과/);
+  f.manager.resolver.discover=async()=>tools;
+  assert.equal((await f.manager.inspect(true)).ready,true);
+  const count=f.events.length;release(undefined);await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(f.manager.status.ready,true);assert.equal(f.manager.mediaTools.ffmpeg,tools.ffmpeg);assert.equal(f.events.length,count);
+});
+
+test('cached fingerprint I/O is also bounded and a failed install always clears installing for retry',async()=>{
+  const f=await runtimeFixture();await f.manager.inspect();f.manager.dependencies.inspectTimeoutMs=50;
+  const fingerprint=f.manager.fingerprint.bind(f.manager);f.manager.fingerprint=()=>new Promise(()=>{});
+  assert.match((await f.manager.inspect()).error,/확인 시간이 초과/);
+  f.manager.fingerprint=fingerprint;assert.equal((await f.manager.inspect(true)).ready,true);
+  delete f.caps.versions.transformers;
+  const runPython=f.manager.dependencies.runPython;f.manager.dependencies.runPython=async(args,progress)=>{if(progress!==undefined)throw Error('synthetic pip stall');return runPython(args,progress);};
+  const failed=await f.manager.install();assert.equal(failed.installing,false);assert.match(failed.error,/synthetic pip stall/);
+  f.manager.dependencies.runPython=runPython;
+  assert.equal((await f.manager.install()).ready,true);assert.equal(f.manager.status.installing,false);
+});

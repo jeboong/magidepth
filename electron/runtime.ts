@@ -22,6 +22,10 @@ interface RuntimeDependencies {
   media?:Pick<MediaToolsResolver,'discover'|'ensure'|'lastReason'>;
   runPython?:(args:string[],progress?:number)=>Promise<string>;
   extract?:(archive:string,directory:string)=>Promise<void>;
+  validationTimeoutMs?:number;
+  installIdleTimeoutMs?:number;
+  installTimeoutMs?:number;
+  inspectTimeoutMs?:number;
 }
 // Ignore user pip configuration (e.g. --user/target/index overrides) in our private runtime.
 const pipArgs=['-m','pip','--isolated','install','--disable-pip-version-check','--no-input','--no-warn-script-location','--progress-bar','off'];
@@ -33,9 +37,11 @@ export class RuntimeManager {
   private current?:Promise<RuntimeStatus>;
   private currentScope?:'depth'|'cloak';
   private inspecting?:Promise<RuntimeStatus>;
+  private inspectionGeneration=0;
   private inspectedAt=0;
   private inspectedFingerprint='';
   private child?:ChildProcess;
+  private blockedChild?:ChildProcess;
   private stopped=false;
   private resolvedMedia?:MediaTools;
   private resolver:Pick<MediaToolsResolver,'discover'|'ensure'|'lastReason'>;
@@ -49,7 +55,7 @@ export class RuntimeManager {
   get modelsDir(){return path.join(this.userData,'models');}
   setDepthModelsReady(ready:boolean){this.report({depthModelsReady:ready});}
   reportModelSetup(progress:number,message:string,complete=false,error?:string){
-    this.report({installing:!complete&&!error,progress,message,error,depthModelsReady:complete});
+    this.report({installing:!complete&&error===undefined,progress,message,error,depthModelsReady:complete});
   }
   /** Legacy private location only. Consumers should pass mediaTools' distinct paths. */
   get binDir(){return path.join(this.userData,'tools','bin');}
@@ -96,21 +102,41 @@ export class RuntimeManager {
   async inspect(force=false){
     if(this.current)return {...this.status};
     if(this.inspecting)return this.inspecting;
-    // Preview/probe batches must not spawn Python once per file. Detect cheap on-disk
-    // changes immediately and periodically recheck packages/environment (5-second TTL).
-    if(!force&&Date.now()-this.inspectedAt<5000&&await this.fingerprint()===this.inspectedFingerprint)return {...this.status};
-    if(this.inspecting)return this.inspecting;
-    this.inspecting=this.inspectState().then(async state=>{this.inspectedFingerprint=await this.fingerprint();this.inspectedAt=Date.now();return state;}).finally(()=>{this.inspecting=undefined;});return this.inspecting;
+    const generation=++this.inspectionGeneration;
+    const valid=()=>generation===this.inspectionGeneration;
+    let timer:ReturnType<typeof setTimeout>;
+    const operation=(async()=>{
+      // The bound includes slow/removable PATH drives and fingerprint I/O too.
+      if(!force&&Date.now()-this.inspectedAt<5000&&await this.fingerprint()===this.inspectedFingerprint)return {...this.status};
+      if(!valid())return {...this.status};
+      const state=await this.inspectState(valid);
+      if(!valid())return {...this.status};
+      const fingerprint=await this.fingerprint();
+      if(valid()){this.inspectedFingerprint=fingerprint;this.inspectedAt=Date.now();}
+      return state;
+    })();
+    const timeout=new Promise<RuntimeStatus>(resolve=>{timer=setTimeout(()=>{
+      if(valid()){
+        this.inspectionGeneration++;this.inspectedAt=0;
+        this.report({ready:false,cloakReady:false,depthModelsReady:false,installing:false,progress:0,error:'엔진 설치 확인 시간이 초과되었습니다. 네트워크 드라이브와 도구 경로를 확인한 뒤 다시 확인해 주세요.',message:'엔진 상태 확인을 완료하지 못했습니다. 다시 확인할 수 있습니다.'});
+      }
+      resolve({...this.status});
+    },this.dependencies.inspectTimeoutMs??120_000);});
+    this.inspecting=Promise.race([operation,timeout]).finally(()=>{clearTimeout(timer);this.inspecting=undefined;});
+    return this.inspecting;
   }
-  private async inspectState(){
+  private async inspectState(valid=()=>true){
     try{
       const [manifest,requirements]=await Promise.all([this.manifest(),this.requirements()]);
+      if(!valid())return {...this.status};
       const [caps,tools]=await Promise.all([this.capabilities(requirements.packages),this.resolver.discover()]);
-      this.resolvedMedia=tools;
+      if(!valid())return {...this.status};
       const ready=!!tools&&await this.depthReady(caps,requirements.packages,manifest),cloakReady=!!tools&&!!caps?.cloak;
+      if(!valid())return {...this.status};
+      this.resolvedMedia=tools;
       const message=ready?`MagiDepth · MagiCloak 준비 완료. ${this.mediaMessage(tools!)}`:cloakReady?`MagiCloak 준비 완료 · MagiDepth는 추가 엔진 설치가 필요합니다. ${this.mediaMessage(tools!)}`:!tools?`영상 도구 확인: ${this.resolver.lastReason} 필요한 도구만 준비합니다.`:caps?`필요한 엔진 구성만 추가합니다. ${this.mediaMessage(tools)}`:`MagiCloak은 경량 설치, MagiDepth는 AI 엔진 설치가 필요합니다. ${this.mediaMessage(tools)}`;
       this.report({ready,cloakReady,installing:false,error:undefined,progress:ready||cloakReady?1:0,message,pythonPath:caps?this.pythonPath:undefined,mediaTools:tools});
-    }catch(error){this.report({ready:false,cloakReady:false,progress:0,message:'엔진 준비 상태를 확인하지 못했습니다.',error:error instanceof Error?error.message:String(error)});}
+    }catch(error){if(valid())this.report({ready:false,cloakReady:false,installing:false,depthModelsReady:false,progress:0,message:'엔진 준비 상태를 확인하지 못했습니다.',error:error instanceof Error?error.message:String(error)});}
     return {...this.status};
   }
   install(){return this.installScope('depth');}
@@ -193,16 +219,26 @@ export class RuntimeManager {
   }
   private execute(args:string[],progress?:number):Promise<string>{
     this.check();
+    if(this.blockedChild)throw new Error('이전 엔진 프로세스가 종료되지 않았습니다. 앱을 종료한 뒤 다시 시도해 주세요.');
     if(this.dependencies.runPython)return this.dependencies.runPython(args,progress);
     return new Promise((resolve,reject)=>{
       const proc=spawn(this.pythonPath,args,{windowsHide:true,cwd:path.dirname(this.pythonPath),env:{...process.env,PYTHONUTF8:'1',PYTHONIOENCODING:'utf-8',PIP_DISABLE_PIP_VERSION_CHECK:'1'}});this.child=proc;
-      let tail='',output='',settled=false;
-      const timer=progress===undefined?setTimeout(()=>{proc.kill();finish(new Error('엔진 검증 응답 시간이 초과되었습니다.'));},60000):undefined;
-      const finish=(error?:Error)=>{if(settled)return;settled=true;if(timer)clearTimeout(timer);if(this.child===proc)this.child=undefined;error?reject(error):resolve(output);};
-      const consume=(chunk:Buffer)=>{const text=chunk.toString('utf8');tail=(tail+text).slice(-6000);if(progress!==undefined){const line=text.trim().split(/[\r\n]+/).filter(Boolean).at(-1);if(line)this.report({progress,message:line.slice(0,240)});}};
+      let tail='',output='',settled=false,timer:ReturnType<typeof setTimeout>|undefined,idle:ReturnType<typeof setTimeout>|undefined;
+      const finish=(error?:Error)=>{if(settled)return;settled=true;if(timer)clearTimeout(timer);if(idle)clearTimeout(idle);if(this.child===proc)this.child=undefined;error?reject(error):resolve(output);};
+      const expire=()=>{
+        if(settled)return;
+        // Reject even if termination fails, but never run a second pip over it.
+        this.blockedChild=proc;
+        proc.once('close',()=>{if(this.blockedChild===proc)this.blockedChild=undefined;});
+        finish(new Error(progress===undefined?'엔진 검증 응답 시간이 초과되었습니다.':'엔진 설치가 오랫동안 응답하지 않아 중단했습니다. 네트워크와 저장 공간을 확인한 뒤 다시 시도해 주세요.'));
+        try{proc.kill();}catch{/* Retry is blocked until the old process really exits. */}
+      };
+      const touch=()=>{if(progress===undefined||settled)return;if(idle)clearTimeout(idle);idle=setTimeout(expire,this.dependencies.installIdleTimeoutMs??10*60_000);};
+      timer=setTimeout(expire,progress===undefined?(this.dependencies.validationTimeoutMs??60_000):(this.dependencies.installTimeoutMs??6*60*60_000));touch();
+      const consume=(chunk:Buffer)=>{const text=chunk.toString('utf8');tail=(tail+text).slice(-6000);if(progress!==undefined){touch();const line=text.trim().split(/[\r\n]+/).filter(Boolean).at(-1);if(line)this.report({progress,message:line.slice(0,240)});}};
       proc.stdout.on('data',(chunk:Buffer)=>{output=(output+chunk.toString('utf8')).slice(-256000);consume(chunk);});proc.stderr.on('data',consume);
       proc.once('error',error=>finish(error));proc.once('close',code=>finish(code===0?undefined:new Error(`엔진 실행 단계 실패 (${code}). ${tail.slice(-1800)}`)));
     });
   }
-  stop(){this.stopped=true;this.inspectedAt=0;this.child?.kill();}
+  stop(){this.stopped=true;this.inspectedAt=0;this.child?.kill();this.blockedChild?.kill();}
 }

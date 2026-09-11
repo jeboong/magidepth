@@ -5,7 +5,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import {pathToFileURL} from 'node:url';
 import {RuntimeManager} from './runtime';
-import {PythonWorker} from './worker';
+import {PythonWorker,type WorkerRequestLimits} from './worker';
 import {createMediaProtocolHandler} from './media-protocol';
 import {MediaPlaybackManager} from './media-playback';
 import {UpdateManager} from './update-manager';
@@ -25,6 +25,8 @@ let worker:PythonWorker|undefined;
 let cloakWorker:PythonWorker|undefined;
 let modelWorker:PythonWorker|undefined;
 let modelJob:{jobId:string;modelId:DownloadModelId}|undefined;
+let catalogRequest:Promise<ModelCatalog>|undefined;
+let systemRequest:Promise<any>|undefined;
 let modelCatalog:ModelCatalog={basicReady:false,models:downloadModelIds.map(id=>({id,name:id,ready:false,builtin:id==='image-small'||id==='video-small',repo:'',revision:'',license:'',reason:'AI 엔진 준비 후 로컬 모델 상태를 확인합니다.'}))};
 let workerFingerprint='';
 let cloakWorkerFingerprint='';
@@ -60,7 +62,7 @@ async function engine(scope:'depth'|'cloak'='depth'){
   const config={python:runtime.pythonPath,backend,bin:runtime.binDir,ffmpeg:runtime.mediaTools?.ffmpeg,ffprobe:runtime.mediaTools?.ffprobe,models:runtime.modelsDir,logs:path.join(app.getPath('userData'),'logs')};
   const fingerprint=JSON.stringify([config.python,config.backend,config.ffmpeg,config.ffprobe,config.models,scope]);
   if(scope==='cloak'){
-    if(cloakWorker&&cloakWorkerFingerprint!==fingerprint){
+    if(cloakWorker&&(cloakWorker.unusable||cloakWorkerFingerprint!==fingerprint)){
       if(cloakWorker.busy)throw new Error('영상 도구 경로가 변경되었습니다. 진행 중인 작업이 끝난 뒤 다시 시도해 주세요.');
       const previous=cloakWorker;await previous.stop();if(cloakWorker===previous){cloakWorker=undefined;cloakWorkerFingerprint='';}
       return engine(scope);
@@ -74,7 +76,7 @@ async function engine(scope:'depth'|'cloak'='depth'){
     cloakWorkerFingerprint=fingerprint;
     return cloakWorker;
   }
-  if(worker&&workerFingerprint!==fingerprint){
+  if(worker&&(worker.unusable||workerFingerprint!==fingerprint)){
     if(worker.busy)throw new Error('영상 도구 경로가 변경되었습니다. 진행 중인 작업이 끝난 뒤 다시 시도해 주세요.');
     const previous=worker;await previous.stop();if(worker===previous){worker=undefined;workerFingerprint='';}
     return engine(scope);
@@ -102,14 +104,39 @@ function modelsEngine(){
     });
   return modelWorker;
 }
+async function modelRequest<T>(id:string,command:string,payload:any,limits:WorkerRequestLimits):Promise<T>{
+  const current=modelsEngine();
+  try{return await current.request<T>(id,command,payload,limits);}
+  catch(error){
+    if(current.unusable||(error instanceof Error&&error.name==='WorkerTimeoutError')){
+      // Do not replace a process until Windows releases its cache/DLL handles.
+      await current.stop();
+      if(modelWorker===current)modelWorker=undefined;
+    }
+    throw error;
+  }
+}
 async function getModelCatalog():Promise<ModelCatalog>{
   if(modelJob||runtimePreparing)return {...modelCatalog,...(modelJob?{busy:modelJob}:{})};
-  const state=await runtime.inspect();
-  if(!state.cloakReady)return {...modelCatalog,basicReady:false,models:modelCatalog.models.map(item=>({...item,ready:false,reason:'먼저 AI 엔진 준비를 완료해 주세요.'}))};
-  if(runtimePreparing||modelJob)return {...modelCatalog,...(modelJob?{busy:modelJob}:{})};
-  modelCatalog=await modelsEngine().request<ModelCatalog>(crypto.randomUUID(),'catalog',{});
-  runtime.setDepthModelsReady(modelCatalog.basicReady);
-  return {...modelCatalog};
+  if(catalogRequest)return catalogRequest;
+  catalogRequest=(async()=>{
+    const started=Date.now();
+    const state=await runtime.inspect();
+    if(!state.cloakReady){
+      modelCatalog={...modelCatalog,basicReady:false,models:modelCatalog.models.map(item=>({...item,ready:false,reason:'먼저 AI 엔진 준비를 완료해 주세요.'}))};
+      runtime.setDepthModelsReady(false);return {...modelCatalog};
+    }
+    if(runtimePreparing||modelJob)return {...modelCatalog,...(modelJob?{busy:modelJob}:{})};
+    try{
+      modelCatalog=await modelRequest<ModelCatalog>(crypto.randomUUID(),'catalog',{}, {timeoutMs:Math.max(1,120_000-(Date.now()-started))});
+      runtime.setDepthModelsReady(modelCatalog.basicReady);
+      return {...modelCatalog,...(modelJob?{busy:modelJob}:{})};
+    }catch(error){
+      modelCatalog={...modelCatalog,basicReady:false,models:modelCatalog.models.map(item=>({...item,ready:false,reason:'모델 확인이 완료되지 않았습니다. 다시 확인해 주세요.'}))};
+      runtime.setDepthModelsReady(false);throw error;
+    }
+  })().finally(()=>{catalogRequest=undefined;});
+  return catalogRequest;
 }
 async function downloadModel(request:any,setup=false):Promise<ModelCatalog>{
   if(!request||typeof request.jobId!=='string'||!request.jobId||request.jobId.length>100||!downloadModelIds.includes(request.modelId))throw new Error('잘못된 모델 다운로드 요청입니다.');
@@ -119,7 +146,7 @@ async function downloadModel(request:any,setup=false):Promise<ModelCatalog>{
     const state=setup?runtime.status:await runtime.inspect();
     if(!state.ready)throw new Error('모델 다운로드 전에 MagiDepth AI 엔진을 준비해 주세요.');
     if(cancelledJobs.has(request.jobId))throw new Error('모델 다운로드가 취소되었습니다.');
-    modelCatalog=await modelsEngine().request<ModelCatalog>(request.jobId,'download',{modelId:request.modelId});
+    modelCatalog=await modelRequest<ModelCatalog>(request.jobId,'download',{modelId:request.modelId},{idleTimeoutMs:300_000,timeoutMs:6*60*60_000});
     runtime.setDepthModelsReady(modelCatalog.basicReady);
     return {...modelCatalog};
   }finally{activeJobs.delete(request.jobId);cancelledJobs.delete(request.jobId);modelJob=undefined;}
@@ -267,16 +294,27 @@ function setupIPC(){
   handle('output:save-as',async suggested=>{const proposed=typeof suggested==='string'?suggested:'depth-video.mp4';const defaultPath=path.isAbsolute(proposed)?proposed:path.join(prefs.outputDir||app.getPath('videos'),path.basename(proposed));const isImage=/\.png$/i.test(proposed);const result=await dialog.showSaveDialog(window,{defaultPath,filters:[{name:isImage?'PNG map image':'MP4 map video',extensions:[isImage?'png':'mp4']}],properties:['createDirectory','showOverwriteConfirmation']});if(result.canceled||!result.filePath)return null;await savePrefs({outputDir:path.dirname(result.filePath)});return result.filePath;});
   handle('output:open-folder',async p=>{const folder=requireLocalPath(p||prefs.outputDir||app.getPath('videos'));if(!(await fs.stat(folder)).isDirectory())throw new Error('폴더가 아닙니다.');const error=await shell.openPath(folder);if(error)throw new Error(error);});
   handle('output:reveal',async p=>{const file=requireLocalPath(p);await fs.access(file);shell.showItemInFolder(file);});
-  handle('runtime:get',()=>runtime.inspect());handle('runtime:install',installRuntime);
+  handle('runtime:get',()=>runtimePreparing?{...runtime.status}:runtime.inspect());handle('runtime:install',installRuntime);
   handle('models:catalog',getModelCatalog);handle('models:download',request=>downloadModel(request));
   handle('models:cancel',async id=>{
     if(typeof id!=='string'||id.length>100)throw new Error('Invalid model job');
-    if(modelJob?.jobId===id){cancelledJobs.add(id);if(modelWorker)await modelWorker.request(crypto.randomUUID(),'cancel',{jobId:id});}
+    if(modelJob?.jobId===id){cancelledJobs.add(id);if(modelWorker)await modelRequest(crypto.randomUUID(),'cancel',{jobId:id},{timeoutMs:10_000});}
   });
   handle('system:get',async()=>{
-    const state=await runtime.inspect();
-    if(!state.ready)return {cuda:false,gpu:'MagiCloak · CPU',vramGB:0,freeVramGB:0,torch:'MagiDepth 엔진 준비 전',python:state.cloakReady?'3.13':'미설치',ffmpeg:!!state.mediaTools,mediaTools:state.mediaTools,appVersion:app.getVersion()};
-    return {...await(await engine()).request<any>(crypto.randomUUID(),'system',{}),mediaTools:state.mediaTools,appVersion:app.getVersion()};
+    // Renderer startup and an external readiness check may ask simultaneously.
+    // Share the information request, not a second job blocked by our own guard.
+    if(systemRequest)return systemRequest;
+    if(runtimePreparing||runtime.status.installing)throw new Error('엔진을 준비 중입니다. 준비가 끝난 뒤 시스템 정보를 다시 확인해 주세요.');
+    if(activeJobs.size)throw new Error('작업이 끝난 뒤 시스템 정보를 다시 확인해 주세요.');
+    const id=crypto.randomUUID();activeJobs.add(id);
+    systemRequest=(async()=>{
+      try{
+        const state=await runtime.inspect();
+        if(!state.ready)return {cuda:false,gpu:'MagiCloak · CPU',vramGB:0,freeVramGB:0,torch:'MagiDepth 엔진 준비 전',python:state.cloakReady?'3.13':'미설치',ffmpeg:!!state.mediaTools,mediaTools:state.mediaTools,appVersion:app.getVersion()};
+        return {...await(await engine()).request<any>(id,'system',{}, {timeoutMs:60_000}),mediaTools:state.mediaTools,appVersion:app.getVersion()};
+      }finally{activeJobs.delete(id);}
+    })().finally(()=>{systemRequest=undefined;});
+    return systemRequest;
   });
   handle('update:check',()=>checkUpdates());
   handle('update:get',()=>updateManager.getStatus());
