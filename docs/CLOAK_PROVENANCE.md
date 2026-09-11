@@ -33,7 +33,7 @@ YuNet은 [OpenCV Zoo의 공식 얼굴 검출 모델](https://github.com/opencv/o
 | 얼굴 ROI | ellipse/rect feather .18, 원본 ROI 좌표 clamp와 순서 A→B→C→blend→grid |
 | Tracking | IOU .3 greedy association, EMA .5, max_age8, optical flow 원본 파라미터 |
 | Grid | rows/cols, thickness/auto-thickness, BGR color, opacity, margin, ellipse/rect, eye angle, dots, anti-aliasing |
-| Manual Grid | tracking OFF이면 정규화 중심·너비·높이로 고정 배치, 검출 무관 |
+| Manual Grid | tracking OFF이면 정규화 중심·너비·높이로 고정 배치, 검출 무관. 원본 단일 배치 유지 및 아래 다중 배치 확장 |
 | Preview | 입력 너비 960 이하 축소 후 처리, temporal=False, 초기 얼굴 프레임 최대14개 샘플 검색 |
 | Video | OpenCV decode → BGR24 pipe → FFmpeg 단일 최종 encode, 원본 FPS·크기 |
 | Audio | 원본의 첫 audio stream → AAC192k, apad + shortest로 실제 video 길이까지 보존/무음 패딩 |
@@ -48,12 +48,13 @@ YuNet은 [OpenCV Zoo의 공식 얼굴 검출 모델](https://github.com/opencv/o
 - PySide6/QThread 대신 기존 MagiMagic의 Electron UI와 취소 가능한 JSON-lines 워커를 사용합니다. Torch/GPU를 필요로 하지 않으며 기존 NumPy/OpenCV만 사용합니다.
 - 원본 README의 A 기본 ON 설명 대신 **실제 원본 UI 기본값인 Grid ON, A/B/C OFF**를 사용합니다.
 - 사용자 화면의 옵션 표기는 **A=그리드, B=원본 A, C=원본 B, D=원본 C**입니다. 내부 `use_grid`, `methods.A/B/C` 키·수식·처리 순서·저장 설정은 바꾸지 않습니다.
+- 수동 배치는 `manual_grids`로 최대16개를 지원합니다. 누락/null은 기존 `man_*` 단일 그리드와 픽셀 단위로 같고, 빈 목록은 그리드 없음입니다. 각 그리드의 기본 ROI 위치·크기는 독립적이며, 스타일은 기존 전역 GridParams를 공유합니다. 목록 순서대로 같은 그리드 함수를 호출하며 자동 추적과 내부 A/B/C 처리에는 영향을 주지 않습니다.
 - 검은 화면 패딩 위치에 `pad_position: before/after`를 추가했습니다. 기본 `after`는 기존 뒤쪽 패딩과 동일합니다. `before`는 짧은 영상의 실제 읽을 수 있는 프레임 수를 확인한 뒤 부족한 검은 프레임을 앞에 넣고, 동일한 프레임 수/FPS만큼 모든 오디오 채널에 무음을 삽입합니다. 목표보다 긴 영상은 앞뒤 어느 선택에서도 이동·축소하지 않습니다. 패딩 초 값은 추가 길이가 아니라 목표 총길이입니다. 추가 프레임 계수 패스는 앞쪽 패딩이 필요한 짧은 영상에만 적용되며, 기본/뒤쪽 처리 경로는 바뀌지 않습니다.
 - 수동 grid/padding만 사용하면 얼굴 검출기 다운로드·초기화를 생략합니다. 초기 `findFace:true` 요청은 얼굴 검색을 위해 검출기를 사용합니다.
 - ffmpeg/ffprobe는 앱 RuntimeManager가 준비한 고정·검증 도구를 사용합니다. 원본의 별도 FFmpeg 자동 업데이트/다운로드와 무음 OpenCV writer fallback은 중복하지 않습니다. 도구가 없으면 명시적 오류로 복구를 안내합니다.
 - 출력은 개별 파일 단위로 임시 저장 후 기존 파일을 덮어쓰지 않는 방식으로 공개합니다. 취소/오류 시 진행 중 임시 파일은 정리하며, 이미 완료된 앞선 배치 파일은 보존합니다.
 - 8-bit 이미지 경로를 명시합니다. 16-bit 이미지를 조용히 uint8로 잘못 처리하지 않고 변환 안내를 제공합니다. JPEG 등 alpha를 지원하지 않는 출력 포맷은 투명도를 저장하지 못합니다.
-- YUV420 인코더의 홀수 크기 입력은 조용히 크기를 바꾸지 않고 YUV444 모드 또는 사전 짝수 크기 변환을 안내합니다.
+- 화면의 품질 선택은 원본 품질 유지/표준/저용량 세 가지로 단순화했습니다. 백엔드는 기존 여섯 키를 계속 받아들이며 원래 CRF/preset 값을 유지합니다. 홀수 너비·높이 영상은 크기를 자르거나 변경하지 않고 자동으로 YUV444를 사용합니다. 이때 일부 플레이어/하드웨어 디코더의 호환성이 낮아질 수 있습니다.
 - 원본의 임의 화이트리스트/업데이트 실행 코드를 포트하지 않습니다. 앱 설치·업데이트·테마·튜토리얼·출력 폴더 UI는 MagiMagic 공통 기능과 통합됩니다.
 
 ## 품질 프리셋은 인코더 설정입니다

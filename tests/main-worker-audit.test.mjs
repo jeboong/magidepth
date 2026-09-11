@@ -8,7 +8,7 @@ import {EventEmitter} from 'node:events';
 import {PassThrough} from 'node:stream';
 import {build} from 'esbuild';
 
-const require=createRequire(import.meta.url),temp=await fs.mkdtemp(path.join(os.tmpdir(),'magimagic-main-audit-'));
+const require=createRequire(import.meta.url),temp=await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(),'magimagic-main-audit-')));
 after(async()=>{await fs.rm(temp,{recursive:true,force:true});});
 const mainSource=await fs.readFile('electron/main.ts','utf8');
 // Export test hooks only in this in-memory bundle, never in the packaged app.

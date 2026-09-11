@@ -66,6 +66,8 @@ import {
   TooltipProvider,
 } from "./components/ui/primitives";
 import { Tutorial } from "./components/Tutorial";
+import { Onboarding, type StartupWorkspace } from "./components/Onboarding";
+import { WorkspaceFaceNav } from "./components/WorkspaceFaceNav";
 import { CloakWorkspace } from "./cloak/CloakWorkspace";
 
 type ViewMode = "compare" | "source" | "depth";
@@ -167,6 +169,8 @@ export default function App() {
   const [cloakTutorial, setCloakTutorial] = useState(false);
   const [prefs, setPrefs] = useState<Preferences>(defaultPreferences);
   const [loaded, setLoaded] = useState(false);
+  const [onboarding, setOnboarding] = useState(false);
+  const [reopenOnboarding, setReopenOnboarding] = useState(false);
   const [video, setVideo] = useState<VideoInfo | null>(null);
   const [runtime, setRuntime] = useState<RuntimeStatus>(initialRuntime);
   const [system, setSystem] = useState<SystemInfo | null>(null);
@@ -199,8 +203,9 @@ export default function App() {
   const activeJob = useRef<string | null>(null);
   const options = prefs.options;
   const busy = !!job;
+  const interactionBlocked = onboarding || !loaded;
   const canRender =
-    !!video && runtime.ready && !busy && !cloakBusy && !isBrowserDemo;
+    !!video && runtime.ready && !busy && !cloakBusy && !isBrowserDemo && !interactionBlocked;
   const isImage = video?.kind === "image";
 
   useEffect(() => {
@@ -223,14 +228,17 @@ export default function App() {
       .then(([p, r]) => {
         if (!alive) return;
         setPrefs(p);
+        setWorkspace(p.startupWorkspace === "cloak" ? "cloak" : "depth");
+        setOnboarding(!p.onboardingDone);
         setRuntime(r);
         setLoaded(true);
         if (r.ready || r.cloakReady) loadSystem(r);
-        if (!p.tutorialDone && !isBrowserDemo) setTutorial(true);
+        if (p.onboardingDone && !p.tutorialDone && p.startupWorkspace !== "cloak" && !isBrowserDemo) setTutorial(true);
       })
       .catch((e) => {
         setError(errorMessage(e));
         setLoaded(true);
+        setOnboarding(true);
       });
     const offRuntime = api.onRuntime((r) => {
       setRuntime(r);
@@ -268,6 +276,30 @@ export default function App() {
     setPrefs((old) => ({ ...old, ...patch }));
     api.setPreferences(patch).catch((e) => setError(errorMessage(e)));
   }, []);
+  const completeOnboarding = useCallback(async (selected: StartupWorkspace) => {
+    const saved = await api.setPreferences({ onboardingDone: true, startupWorkspace: selected });
+    setPrefs(saved);
+    setWorkspace(selected);
+    setTutorial(false);
+    setCloakTutorial(false);
+    setOnboarding(false);
+  }, []);
+  const reopenFeaturePicker = () => {
+    if (busy || cloakBusy || opening) return;
+    setSettings(false);
+    setTutorial(false);
+    setCloakTutorial(false);
+    setDragging(false);
+    setPlaying(false);
+    player.current?.pause();
+    setReopenOnboarding(true);
+    setOnboarding(true);
+  };
+  const switchWorkspace = (next: StartupWorkspace) => {
+    if (interactionBlocked) return;
+    setWorkspace(next);
+    savePrefs({ startupWorkspace: next });
+  };
   const changeOption = <K extends keyof DepthOptions>(
     key: K,
     value: DepthOptions[K],
@@ -295,7 +327,7 @@ export default function App() {
   );
   const openVideo = useCallback(
     async (path?: string) => {
-      if (busy) return;
+      if (busy || interactionBlocked) return;
       setError("");
       try {
         const next = path ?? (await api.chooseVideo());
@@ -324,11 +356,11 @@ export default function App() {
         setOpening(false);
       }
     },
-    [busy],
+    [busy, interactionBlocked],
   );
   useEffect(() => {
     const paste = (e: KeyboardEvent) => {
-      if (workspace !== "depth") return;
+      if (workspace !== "depth" || interactionBlocked) return;
       if (!(e.ctrlKey && e.key.toLowerCase() === "v")) return;
       const target = e.target as HTMLElement;
       if (
@@ -355,10 +387,10 @@ export default function App() {
     };
     window.addEventListener("keydown", paste);
     return () => window.removeEventListener("keydown", paste);
-  }, [openVideo, workspace]);
+  }, [openVideo, workspace, interactionBlocked]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      if (workspace !== "depth") return;
+      if (workspace !== "depth" || interactionBlocked) return;
       const target = e.target as HTMLElement;
       if (
         ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) ||
@@ -390,7 +422,7 @@ export default function App() {
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [video, step, openVideo, settings, tutorial, workspace]);
+  }, [video, step, openVideo, settings, tutorial, workspace, interactionBlocked]);
   useEffect(() => {
     if (workspace !== "depth") player.current?.pause();
   }, [workspace]);
@@ -427,7 +459,7 @@ export default function App() {
     }
   };
   const runPreview = async () => {
-    if (!video || !runtime.ready || busy || cloakBusy) return;
+    if (!video || !runtime.ready || busy || cloakBusy || interactionBlocked) return;
     const id = crypto.randomUUID();
     activeJob.current = id;
     setJob({ id, kind: "preview" });
@@ -563,17 +595,22 @@ export default function App() {
     <TooltipProvider delayDuration={300}>
       <div
         className="app-shell"
+        inert={interactionBlocked}
+        aria-busy={!loaded}
         onDragOver={(e) => {
+          if (interactionBlocked) { e.preventDefault(); return; }
           if (workspace !== "depth") return;
           e.preventDefault();
           if (e.dataTransfer.types.includes("Files")) setDragging(true);
         }}
         onDragLeave={(e) => {
+          if (interactionBlocked) return;
           if (workspace !== "depth") return;
           if (!e.currentTarget.contains(e.relatedTarget as Node))
             setDragging(false);
         }}
         onDrop={(e) => {
+          if (interactionBlocked) { e.preventDefault(); return; }
           if (workspace !== "depth") return;
           e.preventDefault();
           setDragging(false);
@@ -581,7 +618,8 @@ export default function App() {
           if (file) void openVideo(api.getFilePath(file));
         }}
       >
-        <header className="app-header">
+        <header className="app-header magic-header" data-testid="app-header">
+          <div className="magic-header-surface" data-testid="header-surface">
           <a
             href="#"
             className="brand"
@@ -603,28 +641,7 @@ export default function App() {
             </span>
             <span className="brand-tag">STUDIO</span>
           </a>
-          <nav
-            className="workspace-tabs"
-            role="tablist"
-            aria-label="마법 작업실 선택"
-          >
-            <button
-              role="tab"
-              aria-selected={workspace === "depth"}
-              onClick={() => setWorkspace("depth")}
-            >
-              <Layers3 size={15} />
-              MagiDepth{busy && <span className="workspace-busy-dot" />}
-            </button>
-            <button
-              role="tab"
-              aria-selected={workspace === "cloak"}
-              onClick={() => setWorkspace("cloak")}
-            >
-              <ShieldCheck size={15} />
-              MagiCloak{cloakBusy && <span className="workspace-busy-dot" />}
-            </button>
-          </nav>
+          <WorkspaceFaceNav value={workspace} onChange={switchWorkspace} depthBusy={busy} cloakBusy={cloakBusy} />
           <div className="header-right">
             <span className="local-badge">
               <span />
@@ -676,8 +693,12 @@ export default function App() {
               </Button>
             </Tooltip>
           </div>
+          </div>
         </header>
         <main
+          id="workspace-panel-depth"
+          role="tabpanel"
+          aria-labelledby="workspace-tab-depth"
           className="workspace"
           style={{ display: workspace === "depth" ? undefined : "none" }}
         >
@@ -1734,13 +1755,13 @@ export default function App() {
           </aside>
         </main>
         <CloakWorkspace
-          active={workspace === "cloak"}
+          active={workspace === "cloak" && !interactionBlocked}
           runtime={runtime}
           prefs={prefs}
           savePreferences={savePrefs}
-          externalBusy={busy}
+          externalBusy={busy || interactionBlocked}
           onBusyChange={setCloakBusy}
-          tutorialOpen={cloakTutorial}
+          tutorialOpen={cloakTutorial && !onboarding}
           onTutorialClose={() => setCloakTutorial(false)}
           onTutorialOpen={() => setCloakTutorial(true)}
           onOpenSettings={() => setSettings(true)}
@@ -1844,13 +1865,13 @@ export default function App() {
           </div>
         )}
         <Tutorial
-          open={tutorial}
+          open={tutorial && !onboarding}
           onClose={() => {
             setTutorial(false);
             savePrefs({ tutorialDone: true });
           }}
         />
-        <Dialog open={settings} onOpenChange={setSettings}>
+        <Dialog open={settings && !onboarding} onOpenChange={setSettings}>
           <DialogContent>
             <div className="eyebrow">YOUR WORKSPACE</div>
             <DialogTitle className="mt-2 text-xl font-semibold">
@@ -2022,6 +2043,15 @@ export default function App() {
               <Button
                 variant="outline"
                 className="mt-3"
+                onClick={reopenFeaturePicker}
+                disabled={busy || cloakBusy || opening}
+              >
+                <Sparkles />
+                MagiMagic 기능 다시 선택
+              </Button>
+              <Button
+                variant="outline"
+                className="mt-3"
                 onClick={() => {
                   setSettings(false);
                   workspace === "cloak"
@@ -2039,6 +2069,20 @@ export default function App() {
             </div>
           </DialogContent>
         </Dialog>
+        <Onboarding
+          open={onboarding && loaded}
+          initialSelection={reopenOnboarding ? workspace : undefined}
+          reopen={reopenOnboarding}
+          runtime={runtime}
+          browserDemo={isBrowserDemo}
+          onClose={() => setOnboarding(false)}
+          onInstall={async (scope) => {
+            const status = await api.installRuntime(scope);
+            setRuntime(status);
+            return status;
+          }}
+          onComplete={completeOnboarding}
+        />
       </div>
     </TooltipProvider>
   );

@@ -9,6 +9,7 @@ const {chromium}=await import(modulePath?pathToFileURL(resolve(modulePath,'index
 const browser=await chromium.launch({headless:true,channel:'chrome'});
 const page=await browser.newPage({viewport:{width:1440,height:1000}});
 const errors=[];page.on('pageerror',e=>errors.push(e.message));
+await page.addInitScript(()=>localStorage.setItem('depthdesk-demo',JSON.stringify({onboardingDone:true,startupWorkspace:'depth'})));
 await page.goto(process.env.UI_TEST_URL??'http://127.0.0.1:5173');
 await page.getByRole('heading',{name:'MagiDepth',exact:true}).waitFor();
 assert.equal(await page.getByRole('button',{name:'1개 맵 영상 내보내기'}).isDisabled(),true);
@@ -39,7 +40,7 @@ fixture.on('pageerror',e=>errors.push(e.message));
 await fixture.addInitScript(()=>{
   const svg=(a,b)=>'data:image/svg+xml;base64,'+btoa(`<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450"><defs><linearGradient id="g"><stop stop-color="${a}"/><stop offset="1" stop-color="${b}"/></linearGradient></defs><rect width="800" height="450" fill="url(#g)"/><circle cx="400" cy="230" r="100" fill="white" opacity=".4"/></svg>`);
   const source=svg('#596e89','#a4ae92'),depth=svg('#111111','#dddddd'),normal=svg('#8899dd','#ca97db');
-  let prefs={theme:'dark',outputDir:'C:\\UI-Test-Output',tutorialDone:true,autoUpdate:true,options:{maps:['depth','normal'],processingMode:'fast',previewMap:'depth',normalStrength:1,steps:4,model:'image-small',inputSize:280,nearWhite:true,gamma:1,contrast:.5,device:'auto',precision:'auto',outputSize:'source',codec:'h264'}};
+  let prefs={theme:'dark',outputDir:'C:\\UI-Test-Output',tutorialDone:true,onboardingDone:true,startupWorkspace:'depth',autoUpdate:true,options:{maps:['depth','normal'],processingMode:'fast',previewMap:'depth',normalStrength:1,steps:4,model:'image-small',inputSize:280,nearWhite:true,gamma:1,contrast:.5,device:'auto',precision:'auto',outputSize:'source',codec:'h264'}};
   window.depthdesk={getPreferences:async()=>prefs,setPreferences:async p=>(prefs={...prefs,...p}),chooseVideo:async()=>source,getFilePath:()=>source,pasteClipboardImage:async()=>source,probeVideo:async()=>({kind:'image',path:source,name:'ui-test-image.png',width:800,height:450,fps:1,frames:1,duration:1,hasAudio:false}),preview:async()=>({source,image:depth,images:{source,depth,normal},frame:0,width:800,height:450,elapsed:0}),render:async()=>({outputPath:'C:\\UI-Test-Output\\fixture_depth.png',outputPaths:{depth:'fixture_depth.png',normal:'fixture_normal.png'},frames:1,elapsed:0,fps:0}),cancelJob:async()=>{},chooseOutputDir:async()=>null,chooseSavePath:async()=>null,openFolder:async()=>{},revealFile:async()=>{},getRuntime:async()=>({ready:true,installing:false,progress:1,message:'UI TEST FIXTURE'}),installRuntime:async()=>({ready:true,installing:false,progress:1,message:'UI TEST FIXTURE'}),getSystem:async()=>({cuda:false,gpu:'UI TEST FIXTURE',vramGB:0,freeVramGB:0,torch:'test',python:'test',ffmpeg:true}),checkForUpdates:async()=>{},installUpdate:async()=>{},onProgress:()=>()=>{},onRuntime:()=>()=>{},onUpdate:()=>()=>{}};
 });
 await fixture.addInitScript(()=>{
@@ -64,6 +65,7 @@ const ffmpeg=spawnSync(process.env.FFMPEG_PATH??'ffmpeg',['-hide_banner','-logle
 assert.equal(ffmpeg.status,0,ffmpeg.stderr);
 const videoPage=await browser.newPage({viewport:{width:1280,height:900}});
 videoPage.on('pageerror',e=>errors.push(e.message));
+await videoPage.addInitScript(()=>localStorage.setItem('depthdesk-demo',JSON.stringify({onboardingDone:true,startupWorkspace:'depth'})));
 await videoPage.goto(process.env.UI_TEST_URL??'http://127.0.0.1:5173');
 const chooserPromise=videoPage.waitForEvent('filechooser');
 await videoPage.getByRole('button',{name:'파일 선택'}).click();

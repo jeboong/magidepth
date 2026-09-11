@@ -22,6 +22,8 @@ export interface Preferences {
   theme: 'dark' | 'light' | 'system';
   outputDir: string;
   tutorialDone: boolean;
+  onboardingDone: boolean;
+  startupWorkspace: 'depth' | 'cloak';
   autoUpdate: boolean;
   options: DepthOptions;
   cloakOptions: CloakOptions;
@@ -92,5 +94,6 @@ export const defaultOptions: DepthOptions = {
 };
 export const defaultPreferences: Preferences = {
   theme: 'dark', outputDir: '', tutorialDone: false, autoUpdate: true, options: defaultOptions,
+  onboardingDone: false, startupWorkspace: 'depth',
   cloakOptions: defaultCloakOptions, cloakOutputDir: '',
 };

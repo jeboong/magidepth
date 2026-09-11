@@ -1,0 +1,153 @@
+/* Reserve only the compact bar. Expansion overlays the workspace rather than
+   resizing video/canvas surfaces or moving controls underneath the pointer. */
+.app-header.magic-header {
+  --magic-bar-height: 48px;
+  --magic-face-size: 40px;
+  --magic-nav-width: 332px;
+  position: relative;
+  z-index: 30;
+  height: 48px;
+  min-height: 48px;
+  flex: 0 0 48px;
+  padding: 0 !important;
+  border: 0;
+  overflow: visible;
+}
+.magic-header-surface {
+  position: absolute;
+  inset: 0 0 auto;
+  height: var(--magic-bar-height);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--magic-nav-width) minmax(0, 1fr);
+  align-items: center;
+  padding: 0 24px;
+  border-bottom: 1px solid hsl(var(--border));
+  background: var(--header);
+  transition: height .23s cubic-bezier(.2,.75,.25,1), grid-template-columns .23s cubic-bezier(.2,.75,.25,1), box-shadow .23s ease;
+}
+.magic-header:is(:hover, :has(:focus-visible)) {
+  --magic-bar-height: 148px;
+  --magic-face-size: 124px;
+  --magic-nav-width: 440px;
+}
+.magic-header:is(:hover, :has(:focus-visible)) .magic-header-surface {
+  box-shadow: 0 16px 30px -22px #0009;
+}
+.magic-header .brand {
+  justify-self: start;
+  align-self: start;
+  margin-top: 10px;
+  min-width: 0;
+  font-size: 18px;
+  gap: 8px;
+}
+.magic-header .brand-icon { width: 28px; height: 28px; flex-shrink: 0; }
+.magic-header .brand-tag { font-size: 7px; letter-spacing: 1.2px; }
+.magic-header .header-right { justify-self: end; align-self: start; margin-top: 8px; gap: 3px; }
+.magic-header .header-right button { width: 32px; height: 32px; }
+.magic-header .local-badge { font-size: 10px; margin-right: 6px; }
+.magic-header .header-divider { margin: 0 5px; }
+.workspace-face-nav {
+  position: relative;
+  align-self: stretch;
+  width: var(--magic-nav-width);
+  transition: width .23s cubic-bezier(.2,.75,.25,1);
+  isolation: isolate;
+}
+.workspace-face-image, .workspace-face-aura {
+  position: absolute;
+  width: var(--magic-face-size);
+  height: var(--magic-face-size);
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  transition: width .23s cubic-bezier(.2,.75,.25,1), height .23s cubic-bezier(.2,.75,.25,1);
+  pointer-events: none;
+}
+.workspace-face-image { object-fit: contain; user-select: none; filter: drop-shadow(0 3px 5px #0003); }
+.workspace-face-aura { border-radius: 50%; background: radial-gradient(ellipse, hsl(var(--primary) / .12), transparent 70%); }
+.workspace-face-half {
+  --face-accent: 100 133 30;
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 50%;
+  min-height: 44px;
+  background: transparent;
+  border: 0;
+  color: hsl(var(--muted-foreground));
+  cursor: pointer;
+  overflow: hidden;
+  outline: none;
+  -webkit-app-region: no-drag;
+}
+.workspace-face-cloak { --face-accent: 137 77 198; left: 50%; }
+.dark .workspace-face-depth { --face-accent: 199 236 127; }
+.dark .workspace-face-cloak { --face-accent: 196 159 255; }
+.workspace-face-tint {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 200%;
+  background: rgb(var(--face-accent));
+  mask: var(--workspace-face) center / var(--magic-face-size) var(--magic-face-size) no-repeat;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .15s ease, mask-size .23s cubic-bezier(.2,.75,.25,1);
+}
+.workspace-face-cloak .workspace-face-tint { left: -100%; }
+.magic-header:is(:hover, :has(:focus-visible)) .workspace-face-half[aria-selected="true"] .workspace-face-tint { opacity: .24; }
+.magic-header:is(:hover, :has(:focus-visible)) .workspace-face-half:hover .workspace-face-tint,
+.magic-header:is(:hover, :has(:focus-visible)) .workspace-face-half:focus-visible .workspace-face-tint { opacity: .42; }
+.workspace-face-outline {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  width: calc(var(--magic-face-size) / 2 + 2px);
+  height: var(--magic-face-size);
+  transform: translateY(-50%);
+  border: 1px solid transparent;
+  border-radius: 12px 0 0 12px;
+  pointer-events: none;
+  transition: width .23s cubic-bezier(.2,.75,.25,1), height .23s cubic-bezier(.2,.75,.25,1), border-color .15s;
+}
+.workspace-face-cloak .workspace-face-outline { right: auto; left: 0; border-radius: 0 12px 12px 0; }
+.magic-header:is(:hover, :has(:focus-visible)) .workspace-face-half[aria-selected="true"] .workspace-face-outline { border-color: rgb(var(--face-accent) / .48); background: rgb(var(--face-accent) / .035); }
+.magic-header:is(:hover, :has(:focus-visible)) .workspace-face-half:hover .workspace-face-outline { border-color: rgb(var(--face-accent) / .8); }
+.workspace-face-half:focus-visible { outline: 2px solid rgb(var(--face-accent)); outline-offset: -4px; border-radius: 12px; }
+.workspace-face-label { position: absolute; top: 50%; left: 8px; transform: translateY(-50%); text-align: left; }
+.workspace-face-cloak .workspace-face-label { left: auto; right: 8px; text-align: right; }
+.workspace-face-name { display: flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; letter-spacing: -.25px; white-space: nowrap; transition: font-size .23s cubic-bezier(.2,.75,.25,1), letter-spacing .23s; }
+.magic-header:is(:hover, :has(:focus-visible)) .workspace-face-name { font-size: 22px; letter-spacing: -.7px; }
+.workspace-face-cloak .workspace-face-name { justify-content: flex-end; }
+.workspace-face-check { width: 10px; opacity: 0; }
+.workspace-face-half[aria-selected="true"] .workspace-face-check { opacity: 1; }
+.workspace-face-half[aria-selected="true"] .workspace-face-name { color: rgb(var(--face-accent)); }
+.workspace-face-seam { position: absolute; top: 50%; left: 50%; height: var(--magic-face-size); transform: translateY(-50%); border-left: 1px solid hsl(var(--foreground) / .18); opacity: 0; pointer-events: none; transition: height .23s cubic-bezier(.2,.75,.25,1), opacity .15s; }
+.magic-header:is(:hover, :has(:focus-visible)) .workspace-face-seam { opacity: 1; }
+@media (max-width: 1180px) {
+  .magic-header .local-badge, .magic-header .header-divider { display: none; }
+}
+@media (max-width: 800px) {
+  .app-header.magic-header { --magic-nav-width: 292px; }
+  .magic-header:is(:hover, :has(:focus-visible)) { --magic-nav-width: 380px; }
+  .magic-header-surface { padding: 0 12px; }
+  .magic-header:is(:hover, :has(:focus-visible)) .workspace-face-name { font-size: 18px; }
+  .magic-header .brand { font-size: 15px; }
+  .magic-header .brand-icon { display: none; }
+  .workspace-face-label { left: 1px; }
+  .workspace-face-cloak .workspace-face-label { right: 1px; }
+}
+@media (max-width: 620px) {
+  .magic-header-surface { grid-template-columns: 0 minmax(0, 1fr) 96px; padding: 0 8px; }
+  .magic-header .brand { display: none; }
+  .workspace-face-nav { width: 100%; max-width: 332px; justify-self: center; }
+  .magic-header .header-right { gap: 0; }
+}
+@media (hover: none) {
+  .app-header.magic-header { --magic-bar-height: 148px; --magic-face-size: 124px; --magic-nav-width: 440px; height: 148px; min-height: 148px; flex-basis: 148px; }
+  .magic-header .workspace-face-name { font-size: 22px; letter-spacing: -.7px; }
+  .magic-header .workspace-face-half[aria-selected="true"] .workspace-face-tint { opacity: .24; }
+  .magic-header .workspace-face-half[aria-selected="true"] .workspace-face-outline { border-color: rgb(var(--face-accent) / .48); background: rgb(var(--face-accent) / .035); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .magic-header *, .magic-header *::before, .magic-header *::after { transition: none !important; animation: none !important; }
+}

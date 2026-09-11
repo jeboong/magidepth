@@ -33,6 +33,7 @@ function readPrefs(): Preferences {
       cloakOptions: {
         ...defaultPreferences.cloakOptions,
         ...stored.cloakOptions,
+        quality: stored.cloakOptions?.quality === 'balanced' || stored.cloakOptions?.quality === 'small' ? stored.cloakOptions.quality : 'visually_lossless',
         methods: {
           ...defaultPreferences.cloakOptions.methods,
           ...stored.cloakOptions?.methods,

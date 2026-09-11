@@ -59,6 +59,8 @@ class RenderConfig:
     man_cy: float = 0.5
     man_w: float = 0.35
     man_h: float = 0.45
+    # None: original man_* singleton; []: explicitly no manual grids.
+    manual_grids: list[dict] | None = None
 
 
 # ============================================================
@@ -151,12 +153,16 @@ class FrameProcessor:
 
         # 수동 그리드: 사용자가 지정한 위치·크기에 항상 표시(검출 무관)
         if manual_grid:
-            bw = max(6.0, cfg.man_w * W)
-            bh = max(6.0, cfg.man_h * H)
-            cx = cfg.man_cx * W
-            cy = cfg.man_cy * H
-            box = (int(cx - bw / 2), int(cy - bh / 2),
-                   int(cx + bw / 2), int(cy + bh / 2))
-            draw_face_grid(frame, box, cfg.grid, 0.0)
+            grids = cfg.manual_grids
+            if grids is None:
+                grids = [{"cx": cfg.man_cx, "cy": cfg.man_cy, "w": cfg.man_w, "h": cfg.man_h}]
+            for item in grids:
+                bw = max(6.0, item["w"] * W)
+                bh = max(6.0, item["h"] * H)
+                cx = item["cx"] * W
+                cy = item["cy"] * H
+                box = (int(cx - bw / 2), int(cy - bh / 2),
+                       int(cx + bw / 2), int(cy + bh / 2))
+                draw_face_grid(frame, box, cfg.grid, 0.0)
 
         return frame

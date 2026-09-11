@@ -140,7 +140,12 @@ def build_render_cmd(
     if use_audio:
         cmd += ["-map", "1:a:0?"]
 
-    cmd += list(preset.args)
+    video_args = list(preset.args)
+    if (width % 2 or height % 2) and "-pix_fmt" in video_args:
+        # YUV420 cannot represent odd source dimensions. Preserve geometry and
+        # CRF/preset by using YUV444 rather than cropping, resizing or failing.
+        video_args[video_args.index("-pix_fmt") + 1] = "yuv444p"
+    cmd += video_args
 
     if use_audio:
         # 오디오 길이가 영상과 달라도(예: 슬로우모션은 영상만 늘어남) 항상

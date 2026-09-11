@@ -24,6 +24,8 @@ await page.addInitScript(() => {
     theme: "dark",
     outputDir: "C:/test/depth",
     tutorialDone: true,
+    onboardingDone: true,
+    startupWorkspace: 'depth',
     autoUpdate: true,
     options: {
       maps: ["depth"],
@@ -58,6 +60,7 @@ await page.addInitScript(() => {
       man_cy: 0.5,
       man_w: 0.35,
       man_h: 0.45,
+      manual_grids: null,
       grid: {
         rows: 6,
         cols: 6,
@@ -88,6 +91,7 @@ await page.addInitScript(() => {
   });
   const state = (window.__cloakTest = {
     calls: [],
+    preferenceWrites: [],
     renders: [],
     cancelled: [],
     paste: 0,
@@ -109,7 +113,7 @@ await page.addInitScript(() => {
   };
   window.depthdesk = {
     getPreferences: async () => prefs,
-    setPreferences: async (p) => (prefs = { ...prefs, ...p }),
+    setPreferences: async (p) => {state.preferenceWrites.push(p);return prefs = { ...prefs, ...p };},
     getRuntime: async () => runtime,
     installRuntime: async () => runtime,
     getSystem: async () => ({
@@ -299,14 +303,18 @@ assert.equal(
   await page.evaluate(() => window.__cloakTest.calls.at(-1).options.methods.A),
   true,
 );
-const box = await page
-  .getByLabel("Cloak 파일 드롭 및 미리보기 영역", { exact: true })
-  .boundingBox();
-await page.mouse.move(box.x + box.width * 0.4, box.y + box.height * 0.4);
+const box = await page.locator('.manual-grid-editor').boundingBox();
+const moveBox=await page.getByRole('button',{name:'격자 1 이동',exact:true}).boundingBox();
+const beforeDrag=await page.evaluate(()=>({calls:window.__cloakTest.calls.length,writes:window.__cloakTest.preferenceWrites.length}));
+await page.mouse.move(moveBox.x+moveBox.width/2,moveBox.y+moveBox.height/2);
 await page.mouse.down();
-await page.mouse.move(box.x + box.width * 0.65, box.y + box.height * 0.55);
+for(let i=1;i<=20;i++){await page.mouse.move(moveBox.x+moveBox.width/2+box.width*.15*i/20,moveBox.y+moveBox.height/2+box.height*.05*i/20);await page.waitForTimeout(20);}
+assert.deepEqual(await page.evaluate(()=>({calls:window.__cloakTest.calls.length,writes:window.__cloakTest.preferenceWrites.length})),beforeDrag);
+assert.equal(await page.locator('.manual-grid-live').isVisible(),true);
+assert.equal(await page.getByAltText('원본 프레임',{exact:true}).isVisible(),true);
 await page.mouse.up();
 await page.waitForTimeout(400);
+assert.deepEqual(await page.evaluate(()=>({calls:window.__cloakTest.calls.length,writes:window.__cloakTest.preferenceWrites.length})),{calls:beforeDrag.calls+1,writes:beforeDrag.writes+1});
 assert.ok(
   Number(
     await page
@@ -314,6 +322,32 @@ assert.ok(
       .inputValue(),
   ) > 0.6,
 );
+const beforeResize=await page.evaluate(()=>({calls:window.__cloakTest.calls.length,writes:window.__cloakTest.preferenceWrites.length,width:window.__cloakTest.calls.at(-1).options.manual_grids[0].w}));
+const handle=await page.getByRole('button',{name:'격자 1 오른쪽 아래 크기 조절',exact:true}).boundingBox();
+await page.mouse.move(handle.x+handle.width/2,handle.y+handle.height/2);await page.mouse.down();
+await page.mouse.move(handle.x+handle.width/2+box.width*.08,handle.y+handle.height/2+box.height*.07,{steps:12});await page.waitForTimeout(300);
+assert.equal(await page.evaluate(()=>window.__cloakTest.calls.length),beforeResize.calls);
+await page.mouse.up();await page.waitForTimeout(450);
+assert.equal(await page.evaluate(()=>window.__cloakTest.preferenceWrites.length),beforeResize.writes+1);
+assert.ok(await page.evaluate(()=>window.__cloakTest.calls.at(-1).options.manual_grids[0].w)>beforeResize.width+.06);
+await page.getByRole('button',{name:'수동 격자 추가',exact:true}).click();await page.waitForTimeout(450);
+assert.equal(await page.evaluate(()=>window.__cloakTest.calls.at(-1).options.manual_grids.length),2);
+await page.getByRole('spinbutton',{name:'가로 위치',exact:true}).fill('0');await page.waitForTimeout(450);
+const constrained=await page.evaluate(()=>window.__cloakTest.calls.at(-1).options.manual_grids[1]);
+assert.ok(constrained.cx-constrained.w/2>=-.0001);
+await page.getByRole('button',{name:'격자 2 이동',exact:true}).focus();await page.keyboard.press('ArrowRight');await page.waitForTimeout(450);
+assert.ok(await page.evaluate(()=>window.__cloakTest.calls.at(-1).options.manual_grids[1].cx)>constrained.cx);
+await page.keyboard.press('Delete');await page.waitForTimeout(450);
+assert.equal(await page.evaluate(()=>window.__cloakTest.calls.at(-1).options.manual_grids.length),1);
+await page.getByRole('button',{name:'선택한 수동 격자 삭제',exact:true}).click();await page.waitForTimeout(450);
+assert.deepEqual(await page.evaluate(()=>window.__cloakTest.calls.at(-1).options.manual_grids),[]);
+assert.equal(await page.getByRole('button',{name:'격자 1 이동',exact:true}).count(),0);
+await page.getByRole('button',{name:'수동 격자 추가',exact:true}).click();await page.getByRole('button',{name:'수동 격자 추가',exact:true}).click();await page.waitForTimeout(450);
+await page.getByRole('combobox',{name:'Cloak 내보내기 품질',exact:true}).click();
+assert.deepEqual(await page.getByRole('option').allTextContents(),['원본품질','표준','작은파일']);
+await page.getByRole('option',{name:'표준',exact:true}).click();await page.waitForTimeout(450);
+assert.equal(await page.evaluate(()=>window.__cloakTest.calls.at(-1).options.quality),'balanced');
+await page.locator('.cloak-settings-scroll').evaluate(e=>e.scrollTop=0);
 await page.getByRole("button", { name: "비교", exact: true }).click();
 await page
   .getByRole("slider", { name: "Cloak 원본 결과 비교 위치", exact: true })
@@ -363,6 +397,8 @@ assert.equal(
   await page.evaluate(() => window.__cloakTest.renders.at(-1).jobs.length),
   2,
 );
+assert.equal(await page.evaluate(()=>window.__cloakTest.renders.at(-1).options.manual_grids.length),2);
+assert.equal(await page.evaluate(()=>window.__cloakTest.renders.at(-1).options.quality),'balanced');
 assert.equal(
   await page.evaluate(
     () => window.__cloakTest.renders.at(-1).options.pad_position,
@@ -458,6 +494,7 @@ assert.equal(await page.evaluate(() => window.__cloakTest.paste), 1);
 await page.getByRole("tab", { name: "MagiCloak", exact: true }).click();
 await page.setViewportSize({ width: 1100, height: 800 });
 await page.waitForTimeout(400);
+if(!await page.getByRole('button',{name:'2개 일괄 내보내기',exact:true}).isVisible())await page.screenshot({path:'src/tests/artifacts/cloak-compact-failure.png'});
 assert.ok(
   await page
     .getByRole("button", { name: "2개 일괄 내보내기", exact: true })

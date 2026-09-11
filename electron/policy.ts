@@ -29,6 +29,7 @@ export function sanitizeOptions(value:any):DepthOptions{
 export function sanitizePreferences(value:any):Preferences{
   return {...defaultPreferences,theme:['dark','light','system'].includes(value?.theme)?value.theme:'dark',
     outputDir:typeof value?.outputDir==='string'?value.outputDir:'',tutorialDone:value?.tutorialDone===true,
+    onboardingDone:value?.onboardingDone===true,startupWorkspace:value?.startupWorkspace==='cloak'?'cloak':'depth',
     autoUpdate:value?.autoUpdate!==false,options:sanitizeOptions(value?.options),
     cloakOptions:sanitizeCloakOptions(value?.cloakOptions),
     cloakOutputDir:typeof value?.cloakOutputDir==='string'?value.cloakOutputDir:''};
@@ -39,16 +40,25 @@ export function sanitizeCloakOptions(value:any):CloakOptions{
   const num=(value:unknown,min:number,max:number,fallback:number)=>typeof value==='number'&&Number.isFinite(value)?Math.min(max,Math.max(min,value)):fallback;
   const bool=(value:unknown,fallback:boolean)=>typeof value==='boolean'?value:fallback;
   const shape=(value:unknown,fallback:'ellipse'|'rect')=>value==='rect'||value==='ellipse'?value:fallback;
+  const ids=new Set<string>();
+  const manual_grids=Array.isArray(v.manual_grids)?v.manual_grids.slice(0,16).map((item:any,index:number)=>{
+    let id=typeof item?.id==='string'&&item.id.trim()?item.id.trim().slice(0,64):`grid-${index+1}`;
+    let suffix=0;const base=id.slice(0,48);
+    while(ids.has(id))id=`${base}-${index+1}-${++suffix}`;
+    ids.add(id);
+    return {id,cx:num(item?.cx,0,1,d.man_cx),cy:num(item?.cy,0,1,d.man_cy),w:num(item?.w,.05,1,d.man_w),h:num(item?.h,.05,1,d.man_h)};
+  }):null;
   return {
     methods:{A:bool(v.methods?.A,d.methods.A),B:bool(v.methods?.B,d.methods.B),C:bool(v.methods?.C,d.methods.C)},
     eps:num(v.eps,2,30,d.eps),strength:num(v.strength,.01,.2,d.strength),
     use_grid:bool(v.use_grid,d.use_grid),tracking:bool(v.tracking,d.tracking),
-    quality:['visually_lossless','high','balanced','small','lossless','hevc_high'].includes(v.quality)?v.quality:d.quality,
+    quality:v.quality==='balanced'||v.quality==='small'?v.quality:'visually_lossless',
     pad_enabled:bool(v.pad_enabled,d.pad_enabled),pad_seconds:num(v.pad_seconds,1,15,d.pad_seconds),
     pad_position:v.pad_position==='before'?'before':'after',
     roi_shape:shape(v.roi_shape,d.roi_shape),detect_score:num(v.detect_score,.05,.99,d.detect_score),
     man_cx:num(v.man_cx,0,1,d.man_cx),man_cy:num(v.man_cy,0,1,d.man_cy),
     man_w:num(v.man_w,.05,1,d.man_w),man_h:num(v.man_h,.05,1,d.man_h),
+    manual_grids,
     grid:{rows:Math.round(num(g.rows,1,20,d.grid.rows)),cols:Math.round(num(g.cols,1,20,d.grid.cols)),
       thickness:Math.round(num(g.thickness,1,8,d.grid.thickness)),auto_thickness:bool(g.auto_thickness,d.grid.auto_thickness),
       color:[0,1,2].map(i=>Math.round(num(g.color?.[i],0,255,d.grid.color[i]))) as [number,number,number],

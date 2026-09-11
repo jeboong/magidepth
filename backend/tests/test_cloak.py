@@ -249,6 +249,17 @@ class UpstreamPixelParityTests(unittest.TestCase):
         for a, b in zip(results, expected):
             np.testing.assert_array_equal(a, b)
 
+    def test_legacy_manual_grid_null_and_missing_exact(self):
+        reference = self.reference("pipeline")
+        for cx, cy, width, height in ((.5, .5, .35, .45), (0, 1, .3, .2), (.83, .21, .1, .6)):
+            args = dict(methods={"A": False, "B": False, "C": False}, use_grid=True, tracking=False,
+                        man_cx=cx, man_cy=cy, man_w=width, man_h=height)
+            expected = reference.FrameProcessor(reference.RenderConfig(**args), FakeDetector()).process(synthetic())
+            for extra in ({}, {"manual_grids": None}):
+                config = validate_options({**args, **extra})
+                actual = FrameProcessor(config, FakeDetector()).process(synthetic())
+                np.testing.assert_array_equal(actual, expected)
+
     def test_tracker_matches_upstream_with_misses_and_landmarks(self):
         reference = self.reference("tracker").FaceTracker()
         actual = FaceTracker()
@@ -265,8 +276,141 @@ class UpstreamPixelParityTests(unittest.TestCase):
                 np.testing.assert_array_equal(a.landmarks, b.landmarks)
 
 
+class ManualGridTests(unittest.TestCase):
+    grids = [{"id": "left", "cx": .25, "cy": .3, "w": .2, "h": .2},
+             {"id": "right", "cx": .75, "cy": .7, "w": .2, "h": .2}]
+
+    def options(self, **extra):
+        return {"tracking": False, "manual_grids": self.grids,
+                "grid": {"margin": 0, "shape": "rect", "line_aa": False, "auto_thickness": False}, **extra}
+
+    def test_null_empty_and_sixteen_grid_limits(self):
+        self.assertIsNone(validate_options({}).manual_grids)
+        self.assertIsNone(validate_options({"manual_grids": None}).manual_grids)
+        self.assertEqual(validate_options({"manual_grids": []}).manual_grids, [])
+        grids = [{**self.grids[0], "id": str(i)} for i in range(16)]
+        self.assertEqual(len(validate_options({"manual_grids": grids}).manual_grids), 16)
+        with self.assertRaises(ValueError):
+            validate_options({"manual_grids": grids + [{**self.grids[0], "id": "17"}]})
+
+    def test_invalid_grid_ids_and_geometry_rejected(self):
+        base = self.grids[0]
+        bad_entries = [{**base, "id": identifier} for identifier in ("", " ", "x" * 65, 1, None)]
+        bad_entries += [{**base, field: value} for field, value in
+                        (("cx", -.01), ("cy", 1.01), ("w", .049), ("h", 1.01),
+                         ("cx", float("nan")), ("cy", float("inf")), ("w", True))]
+        bad_entries += [{"id": "missing"}, {**base, "arbitrary": 1}, None]
+        for entry in bad_entries:
+            with self.subTest(entry=entry), self.assertRaises(ValueError):
+                validate_options({"manual_grids": [entry]})
+        for entries in ({}, "grid", [base, base]):
+            with self.subTest(entries=entries), self.assertRaises(ValueError):
+                validate_options({"manual_grids": entries})
+        valid = {**base, "id": "x" * 64, "cx": 0, "cy": 1, "w": .05, "h": 1}
+        self.assertEqual(validate_options({"manual_grids": [valid]}).manual_grids, [valid])
+
+    def test_independent_positions_resizing_and_list_order(self):
+        cfg = validate_options(self.options())
+        frame = np.zeros((200, 300, 3), np.uint8)
+        expected = frame.copy()
+        boxes = [(45, 40, 105, 80), (195, 120, 255, 160)]
+        for box in boxes:
+            draw_face_grid(expected, box, cfg.grid, 0)
+        with patch("cloak.processor.draw_face_grid", wraps=draw_face_grid) as draw:
+            actual = FrameProcessor(cfg, FakeDetector()).process(frame.copy())
+        np.testing.assert_array_equal(actual, expected)
+        self.assertEqual([call.args[1] for call in draw.call_args_list], boxes)
+        self.assertGreater(actual[:100, :150].sum(), 0)
+        self.assertGreater(actual[100:, 150:].sum(), 0)
+        moved = [{**self.grids[0], "cx": .2, "w": .3, "h": .3}, self.grids[1]]
+        changed = FrameProcessor(validate_options(self.options(manual_grids=moved)), FakeDetector()).process(frame.copy())
+        self.assertFalse(np.array_equal(changed[:, :150], actual[:, :150]))
+        np.testing.assert_array_equal(changed[:, 150:], actual[:, 150:])
+        with patch("cloak.processor.draw_face_grid", wraps=draw_face_grid) as draw:
+            FrameProcessor(validate_options(self.options(manual_grids=list(reversed(self.grids)))),
+                           FakeDetector()).process(frame.copy())
+        self.assertEqual([call.args[1] for call in draw.call_args_list], list(reversed(boxes)))
+
+    def test_empty_disabled_auto_and_experimental_paths_unchanged(self):
+        original = synthetic()
+        for extra in ({"manual_grids": []}, {"use_grid": False}):
+            output = FrameProcessor(validate_options(self.options(**extra)), FakeDetector()).process(original.copy())
+            np.testing.assert_array_equal(output, original)
+        for extra in ({"tracking": True}, {"tracking": True, "methods": {"A": True, "B": True, "C": True}},
+                      {"use_grid": False, "methods": {"A": True, "B": True, "C": True}}):
+            cfg = self.options(**extra)
+            np.random.seed(123)
+            expected = FrameProcessor(validate_options({**cfg, "manual_grids": None}), FakeDetector()).process(original.copy())
+            np.random.seed(123)
+            actual = FrameProcessor(validate_options(cfg), FakeDetector()).process(original.copy())
+            np.testing.assert_array_equal(actual, expected)
+
+    def test_multigrid_preview_and_exports_consistent(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source, output = root / "input.png", root / "output.png"
+            frame = synthetic(200, 300)
+            cv2.imencode(".png", frame)[1].tofile(source)
+            engine = CloakEngine()
+            options = self.options()
+            with patch("cloak.engine.FaceDetector", side_effect=AssertionError("Manual grids need no detector")):
+                preview = engine.preview({"path": str(source), "options": options}, Job("preview-multi"))
+                engine.render({"jobs": [{"path": str(source), "outputPath": str(output)}],
+                               "options": options}, Job("render-multi"))
+            shown = cv2.imdecode(np.frombuffer(base64.b64decode(preview["image"].split(",", 1)[1]), np.uint8), 1)
+            exported = cv2.imdecode(np.fromfile(output, np.uint8), 1)
+            expected = FrameProcessor(validate_options(options), FakeDetector()).process(frame.copy())
+            np.testing.assert_array_equal(shown, expected)
+            np.testing.assert_array_equal(exported, expected)
+            if ff.find_ffmpeg() and ff.find_ffprobe():
+                video, video_out = root / "input.mkv", root / "output.mp4"
+                subprocess.run([ff.find_ffmpeg(), "-y", "-hide_banner", "-loglevel", "error",
+                                "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", "300x200", "-r", "12", "-i", "-",
+                                "-an", "-c:v", "ffv1", str(video)], input=frame.tobytes() * 3,
+                               check=True, capture_output=True, creationflags=ff._CREATE_NO_WINDOW)
+                preview = engine.preview({"path": str(video), "options": options}, Job("preview-multi-video"))
+                shown = cv2.imdecode(np.frombuffer(base64.b64decode(preview["image"].split(",", 1)[1]), np.uint8), 1)
+                np.testing.assert_array_equal(shown, expected)
+                result = engine.render({"jobs": [{"path": str(video), "outputPath": str(video_out)}],
+                    "options": {**options, "quality": "lossless"}}, Job("render-multi-video"))
+                self.assertEqual(result["frames"], 3)
+                cap = cv2.VideoCapture(str(video_out))
+                try:
+                    for _ in range(3):
+                        ok, decoded = cap.read()
+                        self.assertTrue(ok)
+                        # H.264 QP0 is lossless in YUV444, not in the BGR-to-YUV
+                        # color transform. The geometry/effect remains identical.
+                        self.assertLessEqual(np.abs(decoded.astype(int) - expected).max(), 3)
+                finally:
+                    cap.release()
+
+
 @unittest.skipUnless(ff.find_ffmpeg() and ff.find_ffprobe(), "FFmpeg not available")
 class CloakVideoTests(unittest.TestCase):
+    def test_three_ui_presets_preserve_odd_source_dimensions(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "odd-source.mkv"
+            original = synthetic(181, 321)
+            subprocess.run([ff.find_ffmpeg(), "-y", "-hide_banner", "-loglevel", "error",
+                            "-f", "rawvideo", "-pix_fmt", "bgr24", "-s", "321x181", "-r", "12", "-i", "-",
+                            "-an", "-c:v", "ffv1", str(source)], input=original.tobytes() * 3,
+                           check=True, capture_output=True, creationflags=ff._CREATE_NO_WINDOW)
+            for quality in ("visually_lossless", "balanced", "small"):
+                output = root / (quality + ".mp4")
+                result = CloakEngine().render({"jobs": [{"path": str(source), "outputPath": str(output)}],
+                    "options": {"use_grid": False, "quality": quality}}, Job(quality))
+                info = probe(str(output), thumbnail=False)
+                self.assertEqual((info["width"], info["height"], result["frames"]), (321, 181, 3))
+                frames = self.decoded_frames(output)
+                self.assertEqual(len(frames), 3)
+                self.assertTrue(all(frame.shape == (181, 321, 3) for frame in frames))
+                video = subprocess.run([ff.find_ffprobe(), "-v", "error", "-select_streams", "v:0",
+                                       "-show_entries", "stream=pix_fmt", "-of", "json", str(output)],
+                                      check=True, capture_output=True, text=True, creationflags=ff._CREATE_NO_WINDOW)
+                self.assertEqual(json.loads(video.stdout)["streams"][0]["pix_fmt"], "yuv444p")
+
     def make_padding_fixture(self, root, fps="12", count=6):
         from fractions import Fraction
         duration = count / float(Fraction(fps))

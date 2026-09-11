@@ -1,24 +1,30 @@
-# 동료에게 보낼 메시지
+# 동료에게 처음 보낼 메시지
 
-MagiMagic(매지매직) 0.2 공개 베타 공유합니다.
+작업할 때 쓰려고 만든 **MagiMagic(매지매직)** 공유합니다. 매지코의 마법을 느껴보세요 🪄
 
-히히, 매지코가 작업실을 두 칸으로 늘렸습니다. 매지코의 마법을 느껴보세요!
+- **MagiDepth:** 이미지·영상에서 Depth / Normal / Alpha / 재질 맵 추출. 빠른·고급 모드, 프레임 미리보기, 트림 지원.
+- **MagiCloak:** 얼굴 그리드 적용, 여러 격자 직접 배치·크기 조절, 이미지·영상 배치 처리, 영상 앞/뒤 검정 패딩.
+- 드래그앤드롭·이미지 Ctrl+V 지원. 미디어는 서버에 올리지 않고 **내 PC에서 처리**합니다.
 
-- **MagiDepth:** 이미지·영상에서 Depth, Normal, Alpha와 재질 맵을 선택해서 추출합니다. 빠른/고급 모드, 프레임 미리보기, 트림을 지원합니다.
-- **MagiCloak:** 얼굴 격자, 실험적 이미지 처리, 혼합 배치 내보내기, 오디오 보존, 짧은 영상 앞/뒤 검정 패딩을 지원합니다.
+**설치:** https://github.com/jeboong/magidepth/releases/tag/v0.3.2
 
-두 기능 모두 드래그앤드롭, 첨부 영역 Ctrl+V 이미지 붙여넣기, 저장 폴더 기억과 다크/라이트 테마를 지원합니다. 미디어 처리는 내 PC에서 실행됩니다.
+`MagiMagic-Setup-0.3.2.exe` 실행 → 시작하기 → 얼굴 왼쪽 Depth / 오른쪽 Cloak을 선택하면 됩니다.
 
-설치: https://github.com/jeboong/magidepth/releases/latest
+**Windows 10/11 64비트용**이며 Depth는 NVIDIA GPU를 권장합니다. 첫 엔진·모델 준비에는 인터넷이 필요하고, 환경에 따라 **수십 분 이상** 걸릴 수 있습니다. Cloak만 쓰면 대용량 AI 엔진은 필요 없습니다.
 
-릴리스의 **MagiMagic-Setup-0.2.0.exe**를 실행해 주세요. 기존 MagiDepth의 설정·엔진·모델 캐시를 이어서 사용합니다. 준비된 시스템 FFmpeg도 검사 후 재사용합니다.
+아직 베타입니다. Cloak B/C/D는 실험적이라 효과가 없을 수 있고, AI 맵도 추정 결과입니다. 설치 파일이 미서명이므로 회사 설치 정책을 확인해 주세요. 써보시고 불편한 점이나 오류 알려주시면 반영하겠습니다!
 
-MagiCloak만 쓰면 가벼운 엔진만 준비하면 됩니다. MagiDepth는 최초 AI 엔진·모델 다운로드에 인터넷과 여유 디스크 공간이 필요합니다. RTX 5070 Ti 16 GB에서 검증했으며 Depth의 CPU 추론은 느립니다.
+---
 
-Depth는 **Depth + 스피드 또는 밸런스**, Cloak은 기본 **A 얼굴 격자**로 시작해 보세요. B/C/D는 실험적이며 적용 효과가 없을 수 있습니다. Cloak은 익명화나 특정 서비스의 판정 회피를 보장하지 않습니다. MagiDepth 맵 영상은 무음이고 MagiCloak은 원본 오디오를 AAC로 유지합니다.
+## 링크와 추가 안내
 
-고급 Marigold 모델은 별도 이용 조건이 있으니 README의 모델 라이선스와 회사 정책도 확인해 주세요.
+- 고정 버전 설치 파일: https://github.com/jeboong/magidepth/releases/download/v0.3.2/MagiMagic-Setup-0.3.2.exe
+- 이후 최신 버전: https://github.com/jeboong/magidepth/releases/latest
+- 소스·자세한 사용법: https://github.com/jeboong/magidepth
+- 오류 제보: https://github.com/jeboong/magidepth/issues
 
-현재 미서명 베타이므로 Windows 경고가 표시될 수 있습니다. 회사 설치 정책에 따라 출처와 체크섬을 확인해 주세요. 오류 제보 시 개인 영상·프로젝트 경로가 공개되지 않도록 주의해 주세요.
+Depth는 RAM 16GB 이상, 기본 여유 공간 12GB 이상을 권장합니다. 고급 AI 다중 맵은 RAM 32GB·여유 공간 25GB 이상을 권장하며 영상 출력 공간은 별도입니다. NVIDIA 외 GPU 가속은 제공하지 않고 CPU 추론은 느릴 수 있습니다.
 
-사용법/소스: https://github.com/jeboong/magidepth
+Depth 영상은 8bit 무음 MP4이며 재질·Normal·Alpha는 추정/근사 결과입니다. Cloak은 원본 오디오를 AAC로 재인코딩하고, ‘원본품질’은 무손실을 뜻하지 않습니다. Cloak은 익명화나 특정 서비스의 판정 회피를 보장하지 않습니다.
+
+SmartScreen 경고가 나면 릴리스 출처와 SHA256SUMS.txt를 확인하고 회사의 설치 절차를 따르세요. 보안 기능을 끄지 마세요. 모델별 이용 조건은 README와 THIRD_PARTY_NOTICES.md를 확인하세요. 공개 오류 제보에는 개인 영상이나 프로젝트 경로를 올리지 마세요.

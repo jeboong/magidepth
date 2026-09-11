@@ -315,10 +315,8 @@ class CloakEngine:
                                           str(source) if ff.has_audio(str(source)) else None,
                                           cfg.pad_seconds if will_pad else None,
                                           audio_delay_seconds=prefix_frames / fps)
-            # YUV420 codecs require even dimensions. Refuse rather than silently
-            # resize/crop the source and alter the original algorithm's geometry.
-            if cfg.quality != "lossless" and (width % 2 or height % 2):
-                raise ValueError("홀수 크기 영상은 '완전 무손실(YUV444)'을 선택하거나 짝수 크기로 변환하세요.")
+            # The command selects YUV444 for odd dimensions without changing the
+            # source geometry or the chosen quality's CRF/preset.
             process = job.track(subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                                                  stderr=error_file, creationflags=CREATE_NO_WINDOW))
             processor.reset()

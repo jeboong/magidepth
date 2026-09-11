@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type PointerEvent as ReactPointerEvent,
-} from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowDownToLine,
   TriangleAlert,
@@ -55,6 +49,12 @@ import {
   Tooltip,
 } from "../components/ui/primitives";
 import { CloakTutorial } from "./CloakTutorial";
+import {
+  ManualGridOverlay,
+  ManualGridControls,
+  readManualGrids,
+  type ManualGrid,
+} from "./ManualGridEditor";
 
 type Media = VideoInfo & { thumbnail?: string };
 type Props = {
@@ -69,30 +69,17 @@ type Props = {
   onTutorialOpen: () => void;
   onOpenSettings: () => void;
 };
-const qualityInfo: Record<CloakQuality, { label: string; detail: string }> = {
+const qualityInfo = {
   visually_lossless: {
-    label: "원본에 가까운 품질 · 권장",
+    label: "원본품질",
     detail: "H.264 · CRF 14 · slow. 시각적 손실을 줄입니다.",
   },
-  high: {
-    label: "고품질",
-    detail: "H.264 · CRF 18 · medium. 품질과 용량의 균형.",
-  },
-  balanced: { label: "표준 · 빠른 인코딩", detail: "H.264 · CRF 20 · fast." },
+  balanced: { label: "표준", detail: "H.264 · CRF 20 · fast." },
   small: {
-    label: "작은 파일",
+    label: "작은파일",
     detail: "H.264 · CRF 28 · veryfast. 화질 손실이 커집니다.",
   },
-  lossless: {
-    label: "코덱 무손실 · 큰 파일",
-    detail:
-      "H.264 · QP 0 · yuv444p. 색공간 변환이 있어 원본 RGB와 픽셀 동일하지 않습니다.",
-  },
-  hevc_high: {
-    label: "HEVC 고품질",
-    detail: "H.265 · CRF 20 · medium. 재생 앱의 H.265 호환성을 확인하세요.",
-  },
-};
+} as const;
 const message = (e: unknown) => (e instanceof Error ? e.message : String(e));
 const seconds = (s: number) =>
   `${Math.floor(s / 60)
@@ -214,7 +201,9 @@ export function CloakWorkspace({
   const [notice, setNotice] = useState("");
   const [dragging, setDragging] = useState(false);
   const [refresh, setRefresh] = useState(0);
-  const [manualDragging, setManualDragging] = useState(false);
+  const [manualEditing, setManualEditing] = useState(false);
+  const [activeGridId, setActiveGridId] = useState("");
+  const [previewKey, setPreviewKey] = useState("");
   const root = useRef<HTMLElement>(null);
   const stage = useRef<HTMLDivElement>(null);
   const hovering = useRef(false);
@@ -227,8 +216,20 @@ export function CloakWorkspace({
   const skipPreview = useRef("");
   const seekChange = useRef(false);
   const selected = items.find((i) => i.path === selectedPath) ?? items[0];
-  const options = prefs.cloakOptions ?? defaultCloakOptions;
+  const storedOptions = prefs.cloakOptions ?? defaultCloakOptions;
+  const quality: keyof typeof qualityInfo =
+    storedOptions.quality === "balanced" || storedOptions.quality === "small"
+      ? storedOptions.quality
+      : "visually_lossless";
+  const options: CloakOptions =
+    storedOptions.quality === quality
+      ? storedOptions
+      : { ...storedOptions, quality };
   const optionKey = JSON.stringify(options);
+  const manualGrids = readManualGrids(options);
+  const selectedGridId = manualGrids.some((g) => g.id === activeGridId)
+    ? activeGridId
+    : (manualGrids[0]?.id ?? "");
   const ready = !!runtime.cloakReady && !isBrowserDemo;
   const locked = rendering || externalBusy;
   const patch = useCallback(
@@ -238,6 +239,26 @@ export function CloakWorkspace({
   );
   const grid = (change: Partial<CloakOptions["grid"]>) =>
     patch({ grid: { ...options.grid, ...change } });
+  const commitManualGrids = (grids: ManualGrid[]) => {
+    const selectedGrid = grids.find((g) => g.id === activeGridId) ?? grids[0];
+    patch({
+      manual_grids: grids,
+      ...(selectedGrid
+        ? {
+            man_cx: selectedGrid.cx,
+            man_cy: selectedGrid.cy,
+            man_w: selectedGrid.w,
+            man_h: selectedGrid.h,
+          }
+        : {}),
+    });
+    setView("result");
+  };
+  const removeManualGrid = (id: string) => {
+    const next = manualGrids.filter((g) => g.id !== id);
+    commitManualGrids(next);
+    setActiveGridId(next[0]?.id ?? "");
+  };
   const fail = (e: unknown) => setError(message(e));
   const stopPreview = useCallback(() => {
     const stoppedGeneration = ++generation.current;
@@ -291,6 +312,7 @@ export function CloakWorkspace({
       setSelectedPath(item.path);
       setTime(0);
       setPreview(null);
+      setPreviewKey("");
       setError("");
       firstFace.current =
         item.kind === "video" &&
@@ -353,7 +375,7 @@ export function CloakWorkspace({
         locked ||
         selected?.kind !== "video" ||
         (event.target as HTMLElement)?.closest(
-          'input,textarea,[role="slider"],[role="combobox"],[contenteditable="true"]',
+          'input,textarea,[role="slider"],[role="combobox"],[contenteditable="true"],[data-manual-grid-editor]',
         )
       )
         return;
@@ -378,7 +400,7 @@ export function CloakWorkspace({
   }, [active, rendering, locked, selected, addFiles]);
 
   useEffect(() => {
-    if (!active || !selected || !ready || locked) return;
+    if (!active || !selected || !ready || locked || manualEditing) return;
     const signature = `${selected.path}|${time}|${optionKey}`;
     if (skipPreview.current === signature) {
       skipPreview.current = "";
@@ -409,6 +431,7 @@ export function CloakWorkspace({
             });
             if (sequence !== generation.current) return;
             setPreview(result);
+            setPreviewKey(signature);
             setError("");
             if (findFace && selected.kind === "video") {
               const next = clamp(
@@ -418,6 +441,7 @@ export function CloakWorkspace({
               );
               if (Math.abs(next - time) > 0.001) {
                 skipPreview.current = `${selected.path}|${next}|${optionKey}`;
+                setPreviewKey(skipPreview.current);
                 setTime(next);
               }
             }
@@ -435,7 +459,16 @@ export function CloakWorkspace({
     }, delay);
     return () => clearTimeout(timer);
     // Options are represented by their stable serialized value, not an IPC preference object identity.
-  }, [active, selected?.path, time, optionKey, ready, locked, refresh]);
+  }, [
+    active,
+    selected?.path,
+    time,
+    optionKey,
+    ready,
+    locked,
+    refresh,
+    manualEditing,
+  ]);
 
   const changeTime = (value: number) => {
     seekChange.current = true;
@@ -537,33 +570,18 @@ export function CloakWorkspace({
   const processed =
     rendering && progress?.preview ? progress.preview : preview?.image;
   const manual = options.use_grid && !options.tracking && !locked;
-  const moveManual = (event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!manual || !stage.current || !selected) return;
-    const rect = stage.current.getBoundingClientRect();
-    const ratio = selected.width / selected.height;
-    const width = Math.min(rect.width, rect.height * ratio);
-    const height = width / ratio;
-    const x0 = rect.left + (rect.width - width) / 2;
-    const y0 = rect.top + (rect.height - height) / 2;
-    if (
-      !manualDragging &&
-      (event.clientX < x0 ||
-        event.clientX > x0 + width ||
-        event.clientY < y0 ||
-        event.clientY > y0 + height)
-    )
-      return;
-    patch({
-      man_cx: Math.round(clamp((event.clientX - x0) / width) * 100) / 100,
-      man_cy: Math.round(clamp((event.clientY - y0) / height) * 100) / 100,
-    });
-  };
+  const liveManual =
+    manual &&
+    (manualEditing || previewKey !== `${selected?.path}|${time}|${optionKey}`);
   const gridColor = `#${[...options.grid.color]
     .reverse()
     .map((v) => v.toString(16).padStart(2, "0"))
     .join("")}`;
   return (
     <main
+      id="workspace-panel-cloak"
+      role="tabpanel"
+      aria-labelledby="workspace-tab-cloak"
       ref={root}
       className="workspace cloak-workspace"
       style={{ display: active ? undefined : "none" }}
@@ -694,18 +712,6 @@ export function CloakWorkspace({
             className={cn("cloak-stage", manual && "manual-grid")}
             tabIndex={0}
             aria-label="Cloak 파일 드롭 및 미리보기 영역"
-            onPointerDown={(e) => {
-              if (manual && selected) {
-                moveManual(e);
-                setManualDragging(true);
-                e.currentTarget.setPointerCapture(e.pointerId);
-              }
-            }}
-            onPointerMove={(e) => {
-              if (manualDragging) moveManual(e);
-            }}
-            onPointerUp={() => setManualDragging(false)}
-            onPointerCancel={() => setManualDragging(false)}
           >
             {!selected ? (
               <div className="cloak-empty">
@@ -740,10 +746,12 @@ export function CloakWorkspace({
                   <img
                     className="cloak-source"
                     src={mediaUrl(
-                      view === "result" && processed ? processed : source,
+                      view === "result" && processed && !liveManual
+                        ? processed
+                        : source,
                     )}
                     alt={
-                      view === "result" && processed
+                      view === "result" && processed && !liveManual
                         ? "Cloak 처리 결과"
                         : "원본 프레임"
                     }
@@ -797,11 +805,25 @@ export function CloakWorkspace({
                     프레임 갱신 중
                   </div>
                 )}
-                {manual && view !== "compare" && (
-                  <div className="cloak-manual-hint">
-                    <MousePointer2 size={12} />
-                    이미지 위를 드래그하여 격자 이동
-                  </div>
+                {manual && view === "result" && (
+                  <ManualGridOverlay
+                    grids={manualGrids}
+                    activeId={selectedGridId}
+                    onSelect={setActiveGridId}
+                    onStart={() => {
+                      stopPreview();
+                      setManualEditing(true);
+                    }}
+                    onEnd={(grids, changed) => {
+                      if (changed) commitManualGrids(grids);
+                      setManualEditing(false);
+                    }}
+                    onRemove={removeManualGrid}
+                    width={selected.width}
+                    height={selected.height}
+                    style={options.grid}
+                    paint={liveManual}
+                  />
                 )}
                 {selected && !processed && !previewing && (
                   <span className="cloak-image-label source">
@@ -1274,50 +1296,13 @@ export function CloakWorkspace({
                   />
                 </details>
                 {!options.tracking && (
-                  <div className="cloak-manual-controls">
-                    <div className="cloak-manual-title">
-                      <MousePointer2 size={13} />
-                      수동 위치 · 미리보기에서 드래그
-                    </div>
-                    <div className="cloak-dual">
-                      <Range
-                        label="가로 위치"
-                        value={options.man_cx}
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        onChange={(man_cx) => patch({ man_cx })}
-                      />
-                      <Range
-                        label="세로 위치"
-                        value={options.man_cy}
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        onChange={(man_cy) => patch({ man_cy })}
-                      />
-                      <Range
-                        label="격자 너비"
-                        value={options.man_w}
-                        min={0.05}
-                        max={1}
-                        step={0.01}
-                        onChange={(man_w) => patch({ man_w })}
-                      />
-                      <Range
-                        label="격자 높이"
-                        value={options.man_h}
-                        min={0.05}
-                        max={1}
-                        step={0.01}
-                        onChange={(man_h) => patch({ man_h })}
-                      />
-                    </div>
-                    <p className="cloak-control-note">
-                      모든 프레임에 같은 정규화 위치를 적용합니다. 비교
-                      모드에서는 슬라이더로 위치를 조절하세요.
-                    </p>
-                  </div>
+                  <ManualGridControls
+                    grids={manualGrids}
+                    activeId={selectedGridId}
+                    onSelect={setActiveGridId}
+                    onChange={commitManualGrids}
+                    disabled={locked}
+                  />
                 )}
               </section>
             )}
@@ -1328,7 +1313,7 @@ export function CloakWorkspace({
               <label className="cloak-field-label">내보내기 품질</label>
               <Select
                 label="Cloak 내보내기 품질"
-                value={options.quality}
+                value={quality}
                 onValueChange={(quality) =>
                   patch({ quality: quality as CloakQuality })
                 }
@@ -1340,8 +1325,9 @@ export function CloakWorkspace({
                 ))}
               </Select>
               <p className="cloak-control-note">
-                {qualityInfo[options.quality].detail}
+                {qualityInfo[quality].detail}
               </p>
+              {selected?.kind==='video'&&(selected.width%2!==0||selected.height%2!==0)&&<p className="cloak-control-note">홀수 해상도는 원본 크기를 유지하는 YUV444로 저장됩니다. 일부 재생 앱에서는 호환성이 제한될 수 있습니다.</p>}
               <div className="cloak-audio-note">
                 <Volume2 size={13} />
                 <span>

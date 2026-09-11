@@ -147,6 +147,7 @@ async function run() {
       assert.equal(changed.theme,'light');assert.equal(changed.outputDir,outputDir);assert.deepEqual(changed.options.maps,['source']);
       const disk=JSON.parse(await fs.readFile(prefsPath,'utf8'));assert.equal(disk.theme,'light');assert.deepEqual(disk.options.maps,['source']);
       assert.deepEqual((await api('getPreferences')).options.maps,['source']);
+      const onboarding=await api('setPreferences',{onboardingDone:true,startupWorkspace:'cloak'});assert.equal(onboarding.onboardingDone,true);assert.equal(onboarding.startupWorkspace,'cloak');
     });
     await check('synthetic image/video metadata and protected local media protocol',async()=>{
       const image=await api('probeVideo',png);assert.equal(image.kind,'image');assert.equal(image.width,96);assert.equal(image.height,64);
@@ -250,6 +251,18 @@ async function run() {
         const first=spawnSync(ffmpeg,['-v','error','-i',destination,'-frames:v','1','-pix_fmt','gray','-f','rawvideo','-'],{windowsHide:true});
         assert.equal(first.status,0);assert.equal(first.stdout.length,320*180);assert.ok(first.stdout.every(value=>value<3),'First frame must be black, not the original');
       }
+    });
+    await check('MagiCloak multiple manual grids persist, preview and export through IPC',async()=>{
+      const preferences=await api('getPreferences');
+      const manual_grids=[{id:'left',cx:.25,cy:.5,w:.3,h:.6},{id:'right',cx:.75,cy:.5,w:.3,h:.6}];
+      const options={...preferences.cloakOptions,methods:{A:false,B:false,C:false},tracking:false,use_grid:true,pad_enabled:false,manual_grids};
+      const saved=await api('setPreferences',{cloakOptions:options});assert.deepEqual(saved.cloakOptions.manual_grids,manual_grids);
+      const double=await api('cloakPreview',{jobId:`cloak-double-${crypto.randomUUID()}`,path:png,time:0,options});
+      const empty=await api('cloakPreview',{jobId:`cloak-empty-${crypto.randomUUID()}`,path:png,time:0,options:{...options,manual_grids:[]}});
+      assert.notEqual(double.image,empty.image);assert.equal(empty.image,empty.source,'An empty grid list must not regenerate the legacy grid');
+      const destination=path.join(outputDir,'cloak-two-grids.png');
+      const result=await api('cloakRender',{jobId:`cloak-multi-${crypto.randomUUID()}`,jobs:[{path:png,outputPath:destination}],options});assert.equal(result.frames,1);
+      assert.deepEqual(await fs.readFile(destination),Buffer.from(double.image.split(',')[1],'base64'),'Small image preview and exported grid image must be identical');
     });
     if(!packagedDir)await check('development update event through preload subscription',async()=>{
       await renderer(()=>{window.__testUpdate=null;window.__testUnsubscribe=window.depthdesk.onUpdate(value=>{window.__testUpdate=value;});});

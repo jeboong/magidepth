@@ -40,6 +40,23 @@ def validate_options(raw):
                          ("detect_score", .05, .99), ("man_cx", 0, 1), ("man_cy", 0, 1),
                          ("man_w", .05, 1), ("man_h", .05, 1)):
         value[name] = _number(value[name], name, lo, hi)
+    grids = value["manual_grids"]
+    if grids is not None:
+        if not isinstance(grids, list) or len(grids) > 16:
+            raise ValueError("manual_grids must be null or a list of at most 16 grids")
+        checked, identities = [], set()
+        for entry in grids:
+            if not isinstance(entry, dict) or set(entry) != {"id", "cx", "cy", "w", "h"}:
+                raise ValueError("Each manual grid must contain id, cx, cy, w and h")
+            identifier = entry["id"]
+            if not isinstance(identifier, str) or not identifier.strip() or len(identifier) > 64 or identifier in identities:
+                raise ValueError("Manual grid ids must be unique nonblank strings of at most 64 characters")
+            identities.add(identifier)
+            item = {"id": identifier}
+            for name, lo, hi in (("cx", 0, 1), ("cy", 0, 1), ("w", .05, 1), ("h", .05, 1)):
+                item[name] = _number(entry[name], "manual_grids." + name, lo, hi)
+            checked.append(item)
+        value["manual_grids"] = checked
     supplied = value["grid"]
     gp = asdict(GridParams())
     if not isinstance(supplied, dict) or set(supplied) - set(gp):

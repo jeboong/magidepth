@@ -1,0 +1,459 @@
+{
+  "version": 1,
+  "width": 512,
+  "height": 464,
+  "neutralIndex": 0,
+  "poster": "poster.webp",
+  "sourceSha256": "ec12991cf7f834a181ccc056c1d8329e422ec0ff20853abf1657eee6be40a712",
+  "sourceFps": 24,
+  "sourceFrameCount": 145,
+  "sourceCrop": {
+    "left": 174,
+    "top": 9,
+    "width": 522,
+    "height": 471
+  },
+  "sourcePadding": {
+    "bottom": 1
+  },
+  "sheets": [
+    {
+      "file": "poses-0.webp",
+      "width": 2048,
+      "height": 1856
+    },
+    {
+      "file": "poses-1.webp",
+      "width": 2048,
+      "height": 1856
+    },
+    {
+      "file": "poses-2.webp",
+      "width": 2048,
+      "height": 1856
+    },
+    {
+      "file": "poses-3.webp",
+      "width": 2048,
+      "height": 464
+    },
+    {
+      "file": "seam-0.webp",
+      "width": 2048,
+      "height": 1392
+    }
+  ],
+  "frames": [
+    {
+      "sourceFrame": 16,
+      "sheet": 0,
+      "x": 0,
+      "y": 0
+    },
+    {
+      "sourceFrame": 24,
+      "sheet": 0,
+      "x": 512,
+      "y": 0
+    },
+    {
+      "sourceFrame": 26,
+      "sheet": 0,
+      "x": 1024,
+      "y": 0
+    },
+    {
+      "sourceFrame": 28,
+      "sheet": 0,
+      "x": 1536,
+      "y": 0
+    },
+    {
+      "sourceFrame": 30,
+      "sheet": 0,
+      "x": 0,
+      "y": 464
+    },
+    {
+      "sourceFrame": 32,
+      "sheet": 0,
+      "x": 512,
+      "y": 464
+    },
+    {
+      "sourceFrame": 34,
+      "sheet": 0,
+      "x": 1024,
+      "y": 464
+    },
+    {
+      "sourceFrame": 36,
+      "sheet": 0,
+      "x": 1536,
+      "y": 464
+    },
+    {
+      "sourceFrame": 38,
+      "sheet": 0,
+      "x": 0,
+      "y": 928
+    },
+    {
+      "sourceFrame": 40,
+      "sheet": 0,
+      "x": 512,
+      "y": 928
+    },
+    {
+      "sourceFrame": 42,
+      "sheet": 0,
+      "x": 1024,
+      "y": 928
+    },
+    {
+      "sourceFrame": 44,
+      "sheet": 0,
+      "x": 1536,
+      "y": 928
+    },
+    {
+      "sourceFrame": 46,
+      "sheet": 0,
+      "x": 0,
+      "y": 1392
+    },
+    {
+      "sourceFrame": 48,
+      "sheet": 0,
+      "x": 512,
+      "y": 1392
+    },
+    {
+      "sourceFrame": 50,
+      "sheet": 0,
+      "x": 1024,
+      "y": 1392
+    },
+    {
+      "sourceFrame": 52,
+      "sheet": 0,
+      "x": 1536,
+      "y": 1392
+    },
+    {
+      "sourceFrame": 54,
+      "sheet": 1,
+      "x": 0,
+      "y": 0
+    },
+    {
+      "sourceFrame": 56,
+      "sheet": 1,
+      "x": 512,
+      "y": 0
+    },
+    {
+      "sourceFrame": 58,
+      "sheet": 1,
+      "x": 1024,
+      "y": 0
+    },
+    {
+      "sourceFrame": 60,
+      "sheet": 1,
+      "x": 1536,
+      "y": 0
+    },
+    {
+      "sourceFrame": 62,
+      "sheet": 1,
+      "x": 0,
+      "y": 464
+    },
+    {
+      "sourceFrame": 64,
+      "sheet": 1,
+      "x": 512,
+      "y": 464
+    },
+    {
+      "sourceFrame": 66,
+      "sheet": 1,
+      "x": 1024,
+      "y": 464
+    },
+    {
+      "sourceFrame": 68,
+      "sheet": 1,
+      "x": 1536,
+      "y": 464
+    },
+    {
+      "sourceFrame": 70,
+      "sheet": 1,
+      "x": 0,
+      "y": 928
+    },
+    {
+      "sourceFrame": 72,
+      "sheet": 1,
+      "x": 512,
+      "y": 928
+    },
+    {
+      "sourceFrame": 74,
+      "sheet": 1,
+      "x": 1024,
+      "y": 928
+    },
+    {
+      "sourceFrame": 76,
+      "sheet": 1,
+      "x": 1536,
+      "y": 928
+    },
+    {
+      "sourceFrame": 78,
+      "sheet": 1,
+      "x": 0,
+      "y": 1392
+    },
+    {
+      "sourceFrame": 80,
+      "sheet": 1,
+      "x": 512,
+      "y": 1392
+    },
+    {
+      "sourceFrame": 82,
+      "sheet": 1,
+      "x": 1024,
+      "y": 1392
+    },
+    {
+      "sourceFrame": 84,
+      "sheet": 1,
+      "x": 1536,
+      "y": 1392
+    },
+    {
+      "sourceFrame": 86,
+      "sheet": 2,
+      "x": 0,
+      "y": 0
+    },
+    {
+      "sourceFrame": 88,
+      "sheet": 2,
+      "x": 512,
+      "y": 0
+    },
+    {
+      "sourceFrame": 90,
+      "sheet": 2,
+      "x": 1024,
+      "y": 0
+    },
+    {
+      "sourceFrame": 92,
+      "sheet": 2,
+      "x": 1536,
+      "y": 0
+    },
+    {
+      "sourceFrame": 94,
+      "sheet": 2,
+      "x": 0,
+      "y": 464
+    },
+    {
+      "sourceFrame": 96,
+      "sheet": 2,
+      "x": 512,
+      "y": 464
+    },
+    {
+      "sourceFrame": 98,
+      "sheet": 2,
+      "x": 1024,
+      "y": 464
+    },
+    {
+      "sourceFrame": 100,
+      "sheet": 2,
+      "x": 1536,
+      "y": 464
+    },
+    {
+      "sourceFrame": 102,
+      "sheet": 2,
+      "x": 0,
+      "y": 928
+    },
+    {
+      "sourceFrame": 104,
+      "sheet": 2,
+      "x": 512,
+      "y": 928
+    },
+    {
+      "sourceFrame": 106,
+      "sheet": 2,
+      "x": 1024,
+      "y": 928
+    },
+    {
+      "sourceFrame": 108,
+      "sheet": 2,
+      "x": 1536,
+      "y": 928
+    },
+    {
+      "sourceFrame": 110,
+      "sheet": 2,
+      "x": 0,
+      "y": 1392
+    },
+    {
+      "sourceFrame": 112,
+      "sheet": 2,
+      "x": 512,
+      "y": 1392
+    },
+    {
+      "sourceFrame": 114,
+      "sheet": 2,
+      "x": 1024,
+      "y": 1392
+    },
+    {
+      "sourceFrame": 116,
+      "sheet": 2,
+      "x": 1536,
+      "y": 1392
+    },
+    {
+      "sourceFrame": 118,
+      "sheet": 3,
+      "x": 0,
+      "y": 0
+    },
+    {
+      "sourceFrame": 120,
+      "sheet": 3,
+      "x": 512,
+      "y": 0
+    }
+  ],
+  "anchors": [
+    {
+      "angle": 0,
+      "sourceFrame": 24
+    },
+    {
+      "angle": 45,
+      "sourceFrame": 40
+    },
+    {
+      "angle": 90,
+      "sourceFrame": 56
+    },
+    {
+      "angle": 135,
+      "sourceFrame": 72
+    },
+    {
+      "angle": 180,
+      "sourceFrame": 88
+    },
+    {
+      "angle": 225,
+      "sourceFrame": 96
+    },
+    {
+      "angle": 270,
+      "sourceFrame": 104
+    },
+    {
+      "angle": 315,
+      "sourceFrame": 112
+    },
+    {
+      "angle": 360,
+      "sourceFrame": 120
+    }
+  ],
+  "seam": {
+    "fromSourceFrame": 120,
+    "toSourceFrame": 24,
+    "method": "bidirectional-dis-optical-flow",
+    "frames": [
+      {
+        "sheet": 3,
+        "x": 512,
+        "y": 0
+      },
+      {
+        "sheet": 4,
+        "x": 0,
+        "y": 0
+      },
+      {
+        "sheet": 4,
+        "x": 512,
+        "y": 0
+      },
+      {
+        "sheet": 4,
+        "x": 1024,
+        "y": 0
+      },
+      {
+        "sheet": 4,
+        "x": 1536,
+        "y": 0
+      },
+      {
+        "sheet": 4,
+        "x": 0,
+        "y": 464
+      },
+      {
+        "sheet": 4,
+        "x": 512,
+        "y": 464
+      },
+      {
+        "sheet": 4,
+        "x": 1024,
+        "y": 464
+      },
+      {
+        "sheet": 4,
+        "x": 1536,
+        "y": 464
+      },
+      {
+        "sheet": 4,
+        "x": 0,
+        "y": 928
+      },
+      {
+        "sheet": 4,
+        "x": 512,
+        "y": 928
+      },
+      {
+        "sheet": 4,
+        "x": 1024,
+        "y": 928
+      },
+      {
+        "sheet": 0,
+        "x": 512,
+        "y": 0
+      }
+    ]
+  },
+  "idleSeamIndex": 6
+}

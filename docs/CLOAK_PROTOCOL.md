@@ -25,6 +25,7 @@ Options exactly follow `shared/cloak.ts`; original defaults follow the upstream 
   "quality": "visually_lossless", "pad_enabled": false, "pad_seconds": 4, "pad_position": "after",
   "roi_shape": "ellipse", "detect_score": 0.6,
   "man_cx": 0.5, "man_cy": 0.5, "man_w": 0.35, "man_h": 0.45,
+  "manual_grids": null,
   "grid": {
     "rows": 6, "cols": 6, "thickness": 2, "auto_thickness": true,
     "color": [255,255,255], "opacity": 0.6, "margin": 0.06,
@@ -39,6 +40,10 @@ Options exactly follow `shared/cloak.ts`; original defaults follow the upstream 
 `pad_position` accepts only `before` or `after`. Padding is applied only when enabled and the original is shorter than the target; `pad_seconds` is the target total length, not an amount to add. The existing frame rule remains `round(pad_seconds × FPS)`. Before padding counts actual decodable frames (up to the target) and prepends the missing black frames; every audio channel receives the same frame-count/FPS silent delay. After padding appends black frames and silence as before. Long sources are never shortened or shifted. Images ignore video padding. Only short before-padded clips require the extra counting pass; processing math and the normal/after path are unchanged.
 
 UI labels and wire keys intentionally differ: displayed **A = grid** (`use_grid`), **B = original A** (`methods.A`, `eps`), **C = original B** (`methods.B`, `strength`), **D = original C** (`methods.C`, `strength`). Never rename the internal A/B/C keys or reinterpret saved preferences as the new display labels.
+
+`manual_grids` is optional: missing/null preserves the original single `man_cx/man_cy/man_w/man_h` grid pixel-for-pixel; `[]` explicitly draws no manual grid. A list contains at most16 `{id,cx,cy,w,h}` objects, with unique nonblank string ids up to64 characters, finite numeric centers0–1 and widths/heights.05–1. Objects must contain exactly those five fields. The list is read only when `use_grid=true` and `tracking=false`; detection-based grids and internal A/B/C processing do not change. Each rectangle is an unexpanded normalized base ROI: existing global `grid.margin` expands it, then the original renderer clips at image bounds. All entries share global GridParams and are composited in list order. IDs are selection metadata, not draw styles or file paths. Images, video frames and previews use the same list.
+
+The current UI exposes three quality choices: `visually_lossless`, `balanced`, and `small`. The backend still accepts all six original keys for compatibility; the CRF/preset math remains unchanged. Odd-width or odd-height video automatically uses `yuv444p` without resizing/cropping, which can reduce player/hardware-decoder compatibility. Even geometry uses the original preset pixel format.
 
 Input: JPG/JPEG/PNG/BMP/WebP/TIF/TIFF, MP4/MOV/AVI/MKV/WebM/M4V/WMV/FLV. Image output supports the image extensions; video output is MP4/MOV/MKV/M4V. One batch may contain1–500 jobs. Sources, existing outputs and duplicate batch destinations cannot be overwritten. Files are rendered at original geometry and source FPS; preview width may be limited to960.
 
