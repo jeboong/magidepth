@@ -14,7 +14,7 @@ progress: `{id,type:"progress",data:{jobId,stage,progress,message,...}}`.
 Wire progress is 0–1 within its named stage; inference never initiates downloads.
 The main stdin loop can cancel jobs while the single inference worker is busy.
 
-`backend/model_daemon.py` is a separate, non-GPU JSON worker with `catalog`,
+`backend/model_daemon.py` is a separate, standard-library-only JSON worker with `catalog`,
 `download` (`{modelId}`), and `cancel` (`{jobId}`) commands. Catalog requests use
 local immutable-revision files only; they never access the network. Completed
 app and exact-revision Hugging Face caches are reused after integrity checks.

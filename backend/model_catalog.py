@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import time
 import urllib.request
+from model_specs import MODEL_SPECS
 
 DEPTH_SPECS = {
     'video-small': {
@@ -35,9 +36,7 @@ _verified = {}
 
 
 def specs():
-    # The optional module contains only metadata/numpy at import time. No model,
-    # remote code, Torch, or inference pipeline is loaded by this catalog.
-    from advanced_maps import MODEL_SPECS
+    # Metadata only: never import advanced_maps/NumPy on the catalog thread.
     return {**DEPTH_SPECS, **MODEL_SPECS}
 
 
@@ -177,7 +176,7 @@ def download_model(model_id, progress, check):
         part = target.with_suffix(target.suffix + '.magimagic-download')
         url = f"https://huggingface.co/{spec['repo']}/resolve/{spec['revision']}/{name}"
         try:
-            request = urllib.request.Request(url, headers={'User-Agent': 'MagiMagic/0.3.3 model-setup'})
+            request = urllib.request.Request(url, headers={'User-Agent': 'MagiMagic/0.3.4 model-setup'})
             with urllib.request.urlopen(request, timeout=20) as response, part.open('wb') as stream:
                 length = int(response.headers.get('Content-Length') or 0)
                 received, last_report = 0, 0.0

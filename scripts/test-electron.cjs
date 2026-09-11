@@ -122,6 +122,14 @@ async function run() {
       if(packagedDir)assert.equal(system.appVersion,packageVersion);
       console.log(`INFO Electron ${process.versions.electron}; Python ${system.python}; PyTorch ${system.torch}; CUDA available ${system.cuda}`);
     });
+    await check('cold model catalog replies through real Python worker IPC',async()=>{
+      // Await the real result: quitting while this request is still pending hid
+      // the Windows native-import hang in the previous packaged smoke test.
+      const catalog=await api('getModelCatalog');
+      assert.equal(catalog.models.length,6);assert.equal(typeof catalog.basicReady,'boolean');
+      assert.ok(catalog.models.every(item=>typeof item.ready==='boolean'));
+      const again=await api('getModelCatalog');assert.deepEqual(again,catalog);
+    });
     const ffmpeg=(await api('getRuntime')).mediaTools.ffmpeg;
     const png=path.join(fixtureDir,'synthetic.png');
     const mp4=path.join(fixtureDir,'synthetic.mp4');
