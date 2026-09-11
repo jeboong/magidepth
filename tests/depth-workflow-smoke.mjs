@@ -70,6 +70,59 @@ try{
   await render(page);result=await inspect(page);assert.equal(result.renders.at(-1).trimStart,0);assert.equal(result.renders.at(-1).trimEnd,2);
   await page.getByTestId('video-trim-cancel').click();await page.getByTestId('video-trim-open').click();assert.equal(Number(await page.getByRole('spinbutton',{name:'자르기 시작 초',exact:true}).inputValue()),0);
   await page.getByRole('spinbutton',{name:'자르기 시작 초',exact:true}).fill('.4');await page.getByRole('spinbutton',{name:'자르기 종료 초',exact:true}).fill('1.5');await page.getByTestId('video-trim-apply').click();await render(page);result=await inspect(page);assert.equal(result.renders.at(-1).trimStart,.4);assert.equal(result.renders.at(-1).trimEnd,1.5);
+  const playbackSlider=page.getByRole('slider',{name:'재생 위치',exact:true});
+  await page.getByTestId('video-trim-applied').waitFor();
+  assert.match(await page.getByTestId('video-trim-applied').innerText(),/00:00.400 — 00:01.500 · 선택 구간만 재생/);
+  assert.equal(await page.getByTestId('video-trim-open').innerText(),'자르기 수정');
+  assert.ok(Math.abs(Number(await playbackSlider.getAttribute('aria-valuemax'))-32/30)<.001);
+  await seekKey(page,'Home');assert.ok(Math.abs((await pixels(page)).time-.4)<.002);
+  assert.equal(Number(await playbackSlider.getAttribute('aria-valuenow')),0);
+  assert.equal(await page.getByRole('button',{name:'이전 프레임',exact:true}).isDisabled(),true);
+  await seekKey(page,'End');assert.ok(Math.abs((await pixels(page)).time-44/30)<.002);
+  await seekKey(page,'ArrowRight');assert.ok(Math.abs((await pixels(page)).time-44/30)<.002);
+  assert.equal(await page.getByRole('button',{name:'다음 프레임',exact:true}).isDisabled(),true);
+  // Pointer dragging beyond either edge cannot enter removed footage.
+  const sliderBox=await page.getByTestId('playback-timeline').boundingBox();assert.ok(sliderBox);
+  await page.mouse.click(sliderBox.x+1,sliderBox.y+sliderBox.height/2);
+  await page.waitForFunction(()=>{const v=document.querySelector('video.source-video');return !v.seeking&&Math.abs(v.currentTime-.4)<.002;});
+  await page.mouse.click(sliderBox.x+sliderBox.width-1,sliderBox.y+sliderBox.height/2);
+  await page.waitForFunction(()=>{const v=document.querySelector('video.source-video');return !v.seeking&&Math.abs(v.currentTime-44/30)<.002;});
+  // Play at the selected end restarts the selection, then automatically stops.
+  await page.getByRole('button',{name:'원본 재생',exact:true}).click();
+  await page.waitForFunction(()=>{const v=document.querySelector('video.source-video');return !v.paused&&v.currentTime>=.4&&v.currentTime<1;});
+  await page.waitForFunction(()=>{const v=document.querySelector('video.source-video');return v.paused&&!v.seeking&&Math.abs(v.currentTime-44/30)<.002;});
+  await page.locator('body').click({position:{x:5,y:5}});await page.keyboard.press('Space');
+  await page.waitForFunction(()=>{const v=document.querySelector('video.source-video');return !v.paused&&v.currentTime>=.4&&v.currentTime<1;});
+  await page.waitForFunction(()=>{const v=document.querySelector('video.source-video');return v.paused&&!v.seeking&&Math.abs(v.currentTime-44/30)<.002;});
+  await page.screenshot({path:resolve(artifacts,'00-trim-applied-dark.png')});
+  await page.getByRole('button',{name:'테마 전환',exact:true}).click();
+  await page.screenshot({path:resolve(artifacts,'00-trim-applied-light.png')});
+  await page.getByRole('button',{name:'테마 전환',exact:true}).click();
+  // Re-edit deliberately exposes the original; cancel restores applied bounds.
+  await page.getByTestId('video-trim-open').click();await seekKey(page,'End');assert.ok((await pixels(page)).time>1.9);
+  await page.getByTestId('video-trim-cancel').click();
+  await page.waitForFunction(()=>{const v=document.querySelector('video.source-video');return !v.seeking&&Math.abs(v.currentTime-44/30)<.002;});
+  await page.getByTestId('video-trim-open').click();await seekKey(page,'Home');
+  assert.ok((await pixels(page)).time<.002,JSON.stringify(await page.evaluate(()=>({time:document.querySelector('video.source-video').currentTime,slider:document.querySelector('[data-testid="playback-timeline"]').outerHTML,focus:document.activeElement?.outerHTML,events:window.__depthWorkflowMock.mediaEvents.slice(-8)}))));
+  await page.getByTestId('video-trim-cancel').click();
+  await page.waitForFunction(()=>{const v=document.querySelector('video.source-video');return !v.seeking&&Math.abs(v.currentTime-.4)<.002;});
+  // A new selection outside the old bounds must not use a stale seek clamp.
+  await page.getByTestId('video-trim-open').click();
+  await page.getByRole('spinbutton',{name:'자르기 시작 초',exact:true}).fill('.1');
+  await page.getByRole('spinbutton',{name:'자르기 종료 초',exact:true}).fill('.3');await page.getByTestId('video-trim-apply').click();
+  await page.waitForFunction(()=>{const v=document.querySelector('video.source-video');return !v.seeking&&Math.abs(v.currentTime-.1)<.002;});
+  await seekKey(page,'End');assert.ok(Math.abs((await pixels(page)).time-8/30)<.002);
+  // A single-frame selection has no movable seek thumb and cannot yield NaN layout.
+  await page.getByTestId('video-trim-open').click();
+  await page.getByRole('spinbutton',{name:'자르기 종료 초',exact:true}).fill(String(4/30));await page.getByTestId('video-trim-apply').click();
+  assert.equal(await playbackSlider.getAttribute('data-disabled'),'');
+  assert.equal(Number(await playbackSlider.getAttribute('aria-valuenow')),0);
+  assert.equal(await page.locator('.timeline').evaluate(node=>node.innerHTML.includes('NaN')),false);
+  await page.getByTestId('video-trim-clear').click();
+  assert.equal(await page.getByTestId('video-trim-applied').count(),0);
+  await seekKey(page,'Home');assert.ok((await pixels(page)).time<.002);
+  await seekKey(page,'End');assert.ok((await pixels(page)).time>1.9);
+  console.log('PASS App applied trim: visible badge, relative seek bounds, pointer/keyboard limits, automatic stop/replay, re-edit/cancel, changed ranges, single frame, full restoration.');
   await page.getByTestId('video-trim-open').click();await page.getByTestId('video-trim-reset').click();await render(page);result=await inspect(page);assert.equal(result.renders.at(-1).trimStart,0);assert.equal(result.renders.at(-1).trimEnd,2);
   console.log('PASS App optional trim: full export default, draft does not change payload, cancel, applied export, full restore.');
   await page.getByTestId('video-trim-open').click();await page.waitForFunction(()=>{const editor=document.querySelector('[data-video-trim-editor]');return editor?.dataset.thumbnailState==='ready'&&Number(getComputedStyle(editor).opacity)>.99;});await page.getByTestId('video-trim-apply').scrollIntoViewIfNeeded();await page.screenshot({path:resolve(artifacts,'01-video-trim-dark.png')});await page.getByTestId('video-trim-editor').screenshot({path:resolve(artifacts,'01b-video-trim-detail-dark.png')});await page.getByRole('button',{name:'테마 전환',exact:true}).click();await page.screenshot({path:resolve(artifacts,'01c-video-trim-light.png')});await page.getByTestId('video-trim-editor').screenshot({path:resolve(artifacts,'01d-video-trim-detail-light.png')});await page.setViewportSize({width:1040,height:720});await page.getByTestId('video-trim-apply').scrollIntoViewIfNeeded();assert.equal(await page.getByTestId('video-trim-apply').evaluate(button=>{const rect=button.getBoundingClientRect();return rect.top>=0&&rect.bottom<=innerHeight&&button.contains(document.elementFromPoint(rect.x+rect.width/2,rect.y+rect.height/2));}),true);assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);await page.screenshot({path:resolve(artifacts,'01e-video-trim-compact-light.png')});await page.setViewportSize({width:1440,height:1000});await page.getByRole('button',{name:'테마 전환',exact:true}).click();await page.getByTestId('video-trim-cancel').click();

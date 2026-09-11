@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDownToLine,
   ArrowLeftRight,
@@ -69,6 +69,7 @@ import { Onboarding, type StartupWorkspace } from "./components/Onboarding";
 import { WorkspaceFaceNav } from "./components/WorkspaceFaceNav";
 import { CloakWorkspace } from "./cloak/CloakWorkspace";
 import { VideoTrimEditor } from "./components/VideoTrimEditor";
+import {clampPlaybackTime,videoPlaybackWindow,videoTrimBounds,type VideoPlaybackWindow} from "./components/videoTrim";
 import { useModelDownloads } from "./lib/useModelDownloads";
 import { UpdateNotice } from "./components/UpdateNotice";
 import { useVideoPlayback } from "./lib/useVideoPlayback";
@@ -149,6 +150,7 @@ export default function App() {
   const [update, setUpdate] = useState<UpdateStatus>({ status: "idle" });
   const [time, setTime] = useState(0);
   const [trimRange, setTrimRange] = useState<{start:number;end:number}|null>(null);
+  const [trimEditing, setTrimEditing] = useState(false);
   const [view, setView] = useState<ViewMode>("compare");
   const [split, setSplit] = useState(50);
   const [preview, setPreview] = useState<PreviewResult | null>(null);
@@ -185,6 +187,10 @@ export default function App() {
   const isImage = video?.kind === "image";
   const trimStart = isImage ? 0 : trimRange?.start ?? 0;
   const trimEnd = isImage ? 1 : trimRange?.end ?? video?.duration ?? 0;
+  const sourceBounds = useMemo(()=>videoTrimBounds(video?.duration??0,video?.fps??30),[video?.duration,video?.fps]);
+  const previewWindow = useMemo(()=>videoPlaybackWindow(trimEditing?null:trimRange,sourceBounds),[trimEditing,trimRange,sourceBounds]);
+  const trimmedPlayback = !!trimRange&&!trimEditing;
+  const timelineTime = Math.max(0,clampPlaybackTime(time,previewWindow)-previewWindow.start);
 
   useEffect(() => {
     let alive = true;
@@ -305,13 +311,10 @@ export default function App() {
     key: K,
     value: DepthOptions[K],
   ) => savePrefs({ options: { ...options, [key]: value } });
-  const seek = useCallback(
-    (v: number) => {
+  const seekWithin = useCallback(
+    (v: number, window:VideoPlaybackWindow) => {
       if (!video) return;
-      const next = Math.max(
-        0,
-        Math.min(Math.max(0, video.duration - 1 / video.fps), v),
-      );
+      const next = clampPlaybackTime(v,window);
       // Scrubbing navigates the live source, never the last rendered still.
       setView("source");
       setPlaying(false);
@@ -324,6 +327,34 @@ export default function App() {
     },
     [video],
   );
+  const seek = useCallback((value:number)=>seekWithin(value,previewWindow),[seekWithin,previewWindow]);
+  const togglePlayback = useCallback(()=>{
+    const element=player.current;if(!element||!video)return;
+    if(!element.paused){element.pause();return;}
+    // Playing again at the selected endpoint restarts this clip, not the source.
+    const target=element.currentTime>=previewWindow.last-.00001?previewWindow.start:clampPlaybackTime(element.currentTime,previewWindow);
+    if(Math.abs(element.currentTime-target)>.00001){pendingSeek.current=target;element.currentTime=target;}
+    setTime(target);setView("source");
+    void element.play().catch(error=>{
+      // Opening trim or scrubbing can intentionally interrupt a pending play.
+      // That is not a codec failure and must not start proxy preparation.
+      if(error?.name!=="AbortError")playback.mediaError();
+    });
+  },[video,previewWindow,playback.mediaError]);
+  const stopAtTrimEnd = useCallback((element:HTMLVideoElement)=>{
+    if(!trimmedPlayback||element.paused||element.seeking||element.currentTime<previewWindow.last-.00001)return false;
+    // Seek once on stop, never in an onSeeked feedback loop. Keep the final
+    // included frame visible; the trim endpoint itself is exclusive.
+    element.pause();seekWithin(previewWindow.last,previewWindow);return true;
+  },[trimmedPlayback,previewWindow,seekWithin]);
+  useEffect(()=>{
+    if(!playing||!trimmedPlayback)return;
+    const element=player.current;if(!element)return;
+    let frame:number;
+    const tick=()=>{if(element.paused||stopAtTrimEnd(element))return;frame=requestAnimationFrame(tick);};
+    frame=requestAnimationFrame(tick);
+    return()=>cancelAnimationFrame(frame);
+  },[playing,trimmedPlayback,stopAtTrimEnd]);
   const step = useCallback(
     (delta: number) => {
       if (!video) return;
@@ -352,6 +383,7 @@ export default function App() {
         setVideo(info);
         setTime(0);
         setTrimRange(null);
+        setTrimEditing(false);
         pendingSeek.current = 0;
         setPreview(null);
         setResult(null);
@@ -423,18 +455,12 @@ export default function App() {
       }
       if (e.code === "Space" && e.target === document.body) {
         e.preventDefault();
-        if (player.current) {
-          if (player.current.paused) {
-            setView("source");
-            void player.current.play().catch(() => setToast("재생할 수 없는 영상입니다. 호환 미리보기를 준비해 주세요."));
-          }
-          else player.current.pause();
-        }
+        togglePlayback();
       }
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [video, step, openVideo, settings, tutorial, workspace, interactionBlocked]);
+  }, [video, step, togglePlayback, openVideo, settings, tutorial, workspace, interactionBlocked]);
   useEffect(() => {
     if (workspace !== "depth") player.current?.pause();
   }, [workspace]);
@@ -928,7 +954,7 @@ export default function App() {
                         playsInline
                         onLoadedMetadata={event => {
                           const target=pendingSeek.current ?? time;
-                          if (Number.isFinite(target)) event.currentTarget.currentTime=Math.min(target,Math.max(0,video.duration-1/video.fps));
+                          if (Number.isFinite(target)) event.currentTarget.currentTime=clampPlaybackTime(target,previewWindow);
                         }}
                         onSeeked={event => {
                           const element=event.currentTarget;
@@ -937,10 +963,10 @@ export default function App() {
                           // currentTime here can create an endless seeking loop.
                           if(element.seeking)return;
                           pendingSeek.current=null;
-                          setTime(element.currentTime);
+                          setTime(clampPlaybackTime(element.currentTime,previewWindow));
                         }}
                         onTimeUpdate={event => {
-                          if (pendingSeek.current===null) setTime(event.currentTarget.currentTime);
+                          if(!stopAtTrimEnd(event.currentTarget)&&pendingSeek.current===null&&!event.currentTarget.seeking) setTime(clampPlaybackTime(event.currentTarget.currentTime,previewWindow));
                         }}
                         onPlay={() => {pendingSeek.current=null;setPlaying(true);setView("source");}}
                         onPause={() => setPlaying(false)}
@@ -1065,7 +1091,7 @@ export default function App() {
                 )}
               </div>
               {!isImage ? (
-                <div className="timeline">
+                <div className="timeline" data-trimmed={trimmedPlayback || undefined}>
                   {video && playback.phase !== "native" && <div className="playback-notice" role="status">
                     <span>{playback.busy && <LoaderCircle className="animate-spin" size={13}/>}{playback.phase==="proxy" ? "호환 미리보기 · 원본과 내보내기 품질은 그대로" : playback.phase==="waiting" ? "진행 중인 작업 뒤에 호환 미리보기를 준비합니다." : playback.phase==="preparing" ? `재생용 사본 준비 중 · ${Math.round((playback.progress?.progress??0)*100)}%` : playback.error}</span>
                     {playback.busy ? <button onClick={()=>void playback.cancel()}>취소</button> : playback.phase==="error" && <button disabled={busy||modelsBusy||cloakBusy} onClick={()=>void playback.prepare()}>다시 준비</button>}
@@ -1078,7 +1104,7 @@ export default function App() {
                           size="icon"
                           aria-label="이전 프레임"
                           onClick={() => step(-1)}
-                          disabled={!video || busy}
+                          disabled={!video || busy || time <= previewWindow.start + .00001}
                         >
                           <ChevronsLeft />
                         </Button>
@@ -1088,19 +1114,7 @@ export default function App() {
                         size="icon"
                         aria-label={playing ? "일시 정지" : "원본 재생"}
                         disabled={!video || busy || playback.busy}
-                        onClick={() => {
-                          if (player.current) {
-                            if (playing) player.current.pause();
-                            else {
-                              setView("source");
-                              void player.current
-                                .play()
-                                .catch(() =>
-                                  playback.mediaError(),
-                                );
-                            }
-                          }
-                        }}
+                        onClick={togglePlayback}
                       >
                         {playing ? (
                           <Pause />
@@ -1114,14 +1128,14 @@ export default function App() {
                           size="icon"
                           aria-label="다음 프레임"
                           onClick={() => step(1)}
-                          disabled={!video || busy}
+                          disabled={!video || busy || time >= previewWindow.last - .00001}
                         >
                           <ChevronsRight />
                         </Button>
                       </Tooltip>
                       <span className="timecode">
-                        {formatTime(time, true)}
-                        <span>/ {formatTime(video?.duration ?? 0, true)}</span>
+                        {formatTime(timelineTime, true)}
+                        <span>/ {formatTime(previewWindow.duration, true)}</span>
                       </span>
                     </div>
                     <Button
@@ -1141,24 +1155,21 @@ export default function App() {
                       ))}
                     </div>
                     <Slider
+                      data-testid="playback-timeline"
                       aria-label="재생 위치"
                       min={0}
-                      max={
-                        video
-                          ? Math.max(0.01, video.duration - 1 / video.fps)
-                          : 1
-                      }
-                      step={video ? 1 / video.fps : 0.01}
-                      value={[time]}
-                      onValueChange={(v) => seek(v[0])}
-                      disabled={!video || busy}
+                      max={Math.max(1 / sourceBounds.fps, previewWindow.last - previewWindow.start)}
+                      step={1 / sourceBounds.fps}
+                      value={[timelineTime]}
+                      onValueChange={(v) => seek(previewWindow.start + v[0])}
+                      disabled={!video || busy || previewWindow.frames <= 1}
                     />
                     <div className="timeline-labels">
                       <span>00:00</span>
                       <span>
-                        {video ? formatTime(video.duration / 2) : "—"}
+                        {video ? formatTime(previewWindow.duration / 2) : "—"}
                       </span>
-                      <span>{video ? formatTime(video.duration) : "—"}</span>
+                      <span>{video ? formatTime(previewWindow.duration) : "—"}</span>
                     </div>
                   </div>
                   {video && <VideoTrimEditor
@@ -1170,10 +1181,21 @@ export default function App() {
                     value={trimRange}
                     disabled={busy || playback.busy || opening}
                     onSeek={seek}
+                    onEditingChange={editing => {
+                      player.current?.pause();
+                      setPlaying(false);
+                      setTrimEditing(editing);
+                      if (trimEditing && !editing) {
+                        seekWithin(time, videoPlaybackWindow(trimRange, sourceBounds));
+                      }
+                    }}
                     onApply={range => {
                       setTrimRange(range);
-                      if (range) seek(range.start);
-                      setToast(range ? "자르기를 적용했습니다. 선택 구간만 내보냅니다." : "전체 영상으로 복원했습니다.");
+                      setTrimEditing(false);
+                      setPreview(null);
+                      const nextWindow = videoPlaybackWindow(range, sourceBounds);
+                      seekWithin(nextWindow.start, nextWindow);
+                      setToast(range ? "자르기를 적용했습니다. 선택 구간만 재생하고 내보냅니다." : "전체 영상으로 복원했습니다.");
                     }}
                   />}
                 </div>

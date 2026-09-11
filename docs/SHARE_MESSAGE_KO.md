@@ -6,9 +6,9 @@
 - **MagiCloak:** 얼굴 그리드 적용, 여러 격자 직접 배치·크기 조절, 이미지·영상 배치 처리, 영상 앞/뒤 검정 패딩.
 - 드래그앤드롭·이미지 Ctrl+V 지원. 미디어는 서버에 올리지 않고 **내 PC에서 처리**합니다.
 
-**설치:** https://github.com/jeboong/magidepth/releases/tag/v0.3.4
+**설치:** https://github.com/jeboong/magidepth/releases/tag/v0.3.5
 
-`MagiMagic-Setup-0.3.4.exe` 실행 → 시작하기 → 얼굴 왼쪽 Depth / 오른쪽 Cloak을 선택하면 됩니다. Depth 기본 모델은 최초 셋업에 포함되고, 나머지 AI 맵은 필요한 모델만 다운로드한 뒤 선택하세요.
+`MagiMagic-Setup-0.3.5.exe` 실행 → 시작하기 → 얼굴 왼쪽 Depth / 오른쪽 Cloak을 선택하면 됩니다. Depth 기본 모델은 최초 셋업에 포함되고, 나머지 AI 맵은 필요한 모델만 다운로드한 뒤 선택하세요.
 
 **Windows 10/11 64비트용**이며 Depth는 NVIDIA GPU를 권장합니다. 첫 엔진·모델 준비에는 인터넷이 필요하고, 환경에 따라 **수십 분 이상** 걸릴 수 있습니다. Cloak만 쓰면 대용량 AI 엔진은 필요 없습니다.
 
@@ -18,7 +18,7 @@
 
 ## 링크와 추가 안내
 
-- 고정 버전 설치 파일: https://github.com/jeboong/magidepth/releases/download/v0.3.4/MagiMagic-Setup-0.3.4.exe
+- 고정 버전 설치 파일: https://github.com/jeboong/magidepth/releases/download/v0.3.5/MagiMagic-Setup-0.3.5.exe
 - 이후 최신 버전: https://github.com/jeboong/magidepth/releases/latest
 - 소스·자세한 사용법: https://github.com/jeboong/magidepth
 - 오류 제보: https://github.com/jeboong/magidepth/issues

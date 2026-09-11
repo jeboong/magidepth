@@ -3,7 +3,35 @@ import assert from 'node:assert/strict';
 import {build} from 'esbuild';
 const compiled=await build({entryPoints:['src/components/videoTrim.ts'],bundle:true,platform:'node',format:'cjs',write:false});
 const mod={exports:{}};new Function('module','exports',compiled.outputFiles[0].text)(mod,mod.exports);
-const {videoTrimBounds,trimBoundaryTime,trimTimeBoundary,normalizeVideoTrim,moveVideoTrim,exportVideoTrim,trimPreviewTime,formatVideoTrimTime}=mod.exports;
+const {videoTrimBounds,trimBoundaryTime,trimTimeBoundary,normalizeVideoTrim,moveVideoTrim,exportVideoTrim,trimPreviewTime,formatVideoTrimTime,videoPlaybackWindow,clampPlaybackTime}=mod.exports;
+
+test('applied playback uses source boundaries but exposes a shorter clip-relative timeline',()=>{
+  const window=videoPlaybackWindow({start:.4,end:1.5},videoTrimBounds(2,30));
+  assert.deepEqual(window,{start:.4,end:1.5,last:44/30,duration:1.1,frames:33});
+  assert.equal(clampPlaybackTime(0,window),.4);
+  assert.equal(clampPlaybackTime(2,window),44/30);
+  assert.equal(clampPlaybackTime(1.5,window),44/30);
+  assert.equal(clampPlaybackTime(NaN,window),.4);
+  assert.equal(clampPlaybackTime(1,window),1);
+  assert.ok(clampPlaybackTime(999,window)<window.end,'exclusive end is never seekable');
+});
+
+test('one-frame, empty, restored and fractional-FPS playback windows are bounded',()=>{
+  const bounds=videoTrimBounds(2,30),single=videoPlaybackWindow({start:1,end:31/30},bounds);
+  assert.equal(single.frames,1);assert.equal(single.start,single.last);
+  assert.equal(clampPlaybackTime(-1,single),1);assert.equal(clampPlaybackTime(10,single),1);
+  const restored=videoPlaybackWindow(null,bounds);
+  assert.equal(restored.start,0);assert.equal(restored.end,2);assert.equal(restored.last,59/30);
+  const empty=videoPlaybackWindow(null,videoTrimBounds(0,0));
+  assert.deepEqual(empty,{start:0,end:0,last:0,duration:0,frames:0});
+  const fractional=videoTrimBounds(10.01,30000/1001);
+  for(let start=0;start<fractional.frames;start++){
+    const window=videoPlaybackWindow({start:start/fractional.fps,end:10.01},fractional);
+    assert.ok(window.start<=window.last&&window.last<window.end);
+    assert.equal(clampPlaybackTime(-100,window),window.start);
+    assert.equal(clampPlaybackTime(100,window),window.last);
+  }
+});
 test('video trim is optional and full range exports null',()=>{
   const bounds=videoTrimBounds(10,30),full=normalizeVideoTrim(null,bounds);
   assert.deepEqual(full,{start:0,end:300});assert.equal(exportVideoTrim(full,bounds),null);

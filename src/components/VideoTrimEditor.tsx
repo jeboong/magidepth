@@ -1,4 +1,4 @@
-import {useEffect,useId,useMemo,useRef,useState,type KeyboardEvent,type PointerEvent} from 'react';
+import {useEffect,useId,useLayoutEffect,useMemo,useRef,useState,type KeyboardEvent,type PointerEvent} from 'react';
 import {Check,Film,RotateCcw,Scissors,X} from 'lucide-react';
 import {Button} from './ui/button';
 import {exportVideoTrim,formatVideoTrimTime,moveVideoTrim,normalizeVideoTrim,trimBoundaryTime,trimPreviewTime,trimTimeBoundary,videoTrimBounds,type VideoTrimEdge,type VideoTrimFrames,type VideoTrimRange} from './videoTrim';
@@ -13,6 +13,7 @@ export interface VideoTrimEditorProps {
   disabled?:boolean;
   onSeek:(seconds:number)=>void;
   onApply:(range:VideoTrimRange|null)=>void;
+  onEditingChange?:(editing:boolean)=>void;
 }
 interface DragState {pointerId:number;edge:VideoTrimEdge;target:HTMLButtonElement;left:number;width:number;offset:number;initial:VideoTrimFrames;clientX:number}
 type ThumbnailState='loading'|'ready'|'unavailable';
@@ -34,7 +35,7 @@ function TrimTimeInput({label,value,max,step,disabled,onCommit}:{label:string;va
   return <label className="video-trim-time-field"><span>{label}</span><input type="number" min={0} max={max} step={step} value={text} disabled={disabled} aria-label={`자르기 ${label} 초`} onChange={event=>setText(event.target.value)} onBlur={commit} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();event.currentTarget.blur();}if(event.key!=='Escape')event.stopPropagation();}}/><small>초</small></label>;
 }
 
-export function VideoTrimEditor({sourceUrl,duration,fps,currentTime,value,disabled=false,onSeek,onApply}:VideoTrimEditorProps){
+export function VideoTrimEditor({sourceUrl,duration,fps,currentTime,value,disabled=false,onSeek,onApply,onEditingChange}:VideoTrimEditorProps){
   const bounds=useMemo(()=>videoTrimBounds(duration,fps),[duration,fps]);
   const [editing,setEditing]=useState(false);
   const [draft,setDraft]=useState<VideoTrimFrames>(()=>normalizeVideoTrim(value,bounds));
@@ -43,6 +44,9 @@ export function VideoTrimEditor({sourceUrl,duration,fps,currentTime,value,disabl
   const [dragging,setDragging]=useState<VideoTrimEdge|null>(null);
   const draftRef=useRef(draft),drag=useRef<DragState|null>(null),animation=useRef<number|null>(null),track=useRef<HTMLDivElement>(null),openButton=useRef<HTMLButtonElement>(null),startHandle=useRef<HTMLButtonElement>(null);
   const seekRef=useRef(onSeek),boundsRef=useRef(bounds),hint=useId();
+  const editingCallback=useRef(onEditingChange);editingCallback.current=onEditingChange;
+  // Synchronize playback bounds before the newly opened/closed editor can be used.
+  useLayoutEffect(()=>{editingCallback.current?.(editing);},[editing]);
   draftRef.current=draft;seekRef.current=onSeek;boundsRef.current=bounds;
   const usable=!!sourceUrl&&bounds.frames>0&&!disabled;
   const updateDraft=(next:VideoTrimFrames)=>{draftRef.current=next;setDraft(next);};
@@ -87,7 +91,12 @@ export function VideoTrimEditor({sourceUrl,duration,fps,currentTime,value,disabl
     void load();
     return()=>{alive=false;controller.abort();video.pause();video.removeAttribute('src');video.load();};
   },[editing,sourceUrl,bounds]);
-  useEffect(()=>{if(editing){const frame=requestAnimationFrame(()=>startHandle.current?.focus());return()=>cancelAnimationFrame(frame);}},[editing]);
+  const focusedOnce=useRef(false);
+  useLayoutEffect(()=>{
+    if(editing)startHandle.current?.focus();
+    else if(focusedOnce.current)openButton.current?.focus();
+    focusedOnce.current=true;
+  },[editing]);
 
   const preview=(range:VideoTrimFrames,edge:VideoTrimEdge)=>seekRef.current(trimPreviewTime(range,edge,boundsRef.current));
   const move=(edge:VideoTrimEdge,frame:number,seek=true)=>{const next=moveVideoTrim(draftRef.current,edge,frame,bounds);updateDraft(next);if(seek)preview(next,edge);};
@@ -118,14 +127,20 @@ export function VideoTrimEditor({sourceUrl,duration,fps,currentTime,value,disabl
     else return;
     event.preventDefault();event.stopPropagation();move(edge,frame);
   };
-  const close=()=>{clearDrag();setEditing(false);requestAnimationFrame(()=>openButton.current?.focus());};
+  const close=()=>{clearDrag();setEditing(false);};
   const cancel=()=>{updateDraft(normalizeVideoTrim(value,bounds));close();};
   const start=trimBoundaryTime(draft.start,bounds),end=trimBoundaryTime(draft.end,bounds);
   const left=bounds.frames?draft.start/bounds.frames*100:0,right=bounds.frames?draft.end/bounds.frames*100:100;
   const playhead=bounds.duration?Math.max(0,Math.min(100,(Number.isFinite(currentTime)?currentTime:0)/bounds.duration*100)):0;
   const applied=normalizeVideoTrim(value,bounds),hasTrim=value!==null&&(applied.start>0||applied.end<bounds.frames);
 
-  if(!editing)return <div className="video-trim-collapsed"><Button ref={openButton} variant={hasTrim?'secondary':'ghost'} size="sm" disabled={!usable} onClick={()=>{updateDraft(normalizeVideoTrim(value,bounds));setEditing(true);}} title={hasTrim?`${formatVideoTrimTime(trimBoundaryTime(applied.start,bounds))} – ${formatVideoTrimTime(trimBoundaryTime(applied.end,bounds))} 적용 중`:'필요한 경우에만 내보낼 구간을 자르세요'} data-testid="video-trim-open"><Scissors/>자르기</Button></div>;
+  if(!editing)return <div className="video-trim-collapsed" data-applied={hasTrim||undefined}>
+    {hasTrim&&<div className="video-trim-applied" role="status" data-testid="video-trim-applied"><Check size={14}/><span>자르기 적용<small>원본 {formatVideoTrimTime(trimBoundaryTime(applied.start,bounds))} — {formatVideoTrimTime(trimBoundaryTime(applied.end,bounds))} · 선택 구간만 재생</small></span></div>}
+    <div className="video-trim-collapsed-actions">
+      {hasTrim&&<Button variant="ghost" size="sm" disabled={!usable} onClick={()=>onApply(null)} data-testid="video-trim-clear" aria-label="전체 영상 복원" title="자르기를 해제하고 전체 영상을 재생합니다"><RotateCcw/></Button>}
+      <Button ref={openButton} variant={hasTrim?'secondary':'ghost'} size="sm" disabled={!usable} onClick={()=>{updateDraft(normalizeVideoTrim(value,bounds));setEditing(true);}} title={hasTrim?'원본 전체에서 구간을 다시 선택합니다':'필요한 경우에만 재생·내보낼 구간을 자르세요'} data-testid="video-trim-open"><Scissors/>{hasTrim?'자르기 수정':'자르기'}</Button>
+    </div>
+  </div>;
   return <section className="video-trim-editor" aria-label="동영상 자르기 편집" data-video-trim-editor data-testid="video-trim-editor" data-thumbnail-state={thumbnailState} data-dragging={dragging??undefined} onKeyDown={event=>{if(event.key==='Escape'){event.preventDefault();event.stopPropagation();cancel();}}}>
     <div className="video-trim-heading"><span><Scissors size={13}/>동영상 자르기</span><output aria-live={dragging?'off':'polite'}>{formatVideoTrimTime(Math.max(0,end-start))}<small> · {draft.end-draft.start}프레임</small></output></div>
     <div className="video-trim-filmstrip-wrap"><div ref={track} className="video-trim-filmstrip" onPointerDown={event=>{if(!usable||event.button!==0)return;const rect=event.currentTarget.getBoundingClientRect();const seconds=(event.clientX-rect.left)/rect.width*bounds.duration;onSeek(Math.max(0,Math.min(bounds.duration-1/bounds.fps,seconds)));}}>
@@ -137,7 +152,7 @@ export function VideoTrimEditor({sourceUrl,duration,fps,currentTime,value,disabl
       {(['start','end'] as const).map(edge=><button key={edge} ref={edge==='start'?startHandle:undefined} type="button" role="slider" className={`video-trim-handle video-trim-handle-${edge}`} style={{left:`${edge==='start'?left:right}%`}} aria-label={edge==='start'?'자르기 시작 지점':'자르기 종료 지점'} aria-orientation="horizontal" aria-valuemin={edge==='start'?0:trimBoundaryTime(draft.start+1,bounds)} aria-valuemax={edge==='end'?bounds.duration:trimBoundaryTime(draft.end-1,bounds)} aria-valuenow={edge==='start'?start:end} aria-valuetext={`${formatVideoTrimTime(edge==='start'?start:end)}${edge==='end'?' · 종료 지점은 포함하지 않음':''}`} aria-describedby={hint} disabled={!usable} onPointerDown={event=>startDrag(event,edge)} onPointerMove={dragMove} onPointerUp={event=>stopDrag(event)} onPointerCancel={event=>stopDrag(event,true)} onLostPointerCapture={event=>{if(drag.current?.pointerId===event.pointerId)clearDrag(true);}} onKeyDown={event=>handleKeys(event,edge)} data-testid={`video-trim-${edge}-handle`}><span aria-hidden="true"/></button>)}
     </div></div>
     <div className="video-trim-times"><TrimTimeInput label="시작" value={start} max={trimBoundaryTime(draft.end-1,bounds)} step={1/bounds.fps} disabled={!usable} onCommit={seconds=>move('start',trimTimeBoundary(seconds,bounds))}/><span aria-hidden="true">—</span><TrimTimeInput label="종료" value={end} max={bounds.duration} step={1/bounds.fps} disabled={!usable} onCommit={seconds=>move('end',trimTimeBoundary(seconds,bounds))}/><small>종료 프레임 제외</small></div>
-    <p id={hint} className="video-trim-hint">양끝을 드래그하거나 ← →로 1프레임씩 조절하세요. 적용 전에는 내보낼 구간이 바뀌지 않습니다.</p>
+    <p id={hint} className="video-trim-hint">원본 전체에서 양끝을 드래그하거나 ← →로 1프레임씩 조절하세요. 적용하면 재생·내보내기 범위가 함께 바뀝니다. 취소하면 이전 구간으로 돌아갑니다.</p>
     <div className="video-trim-actions"><Button variant="ghost" size="sm" disabled={!usable} onClick={()=>{onApply(null);close();}} data-testid="video-trim-reset"><RotateCcw/>전체 영상 복원</Button><div><Button variant="ghost" size="sm" onClick={cancel} data-testid="video-trim-cancel"><X/>취소</Button><Button size="sm" disabled={!usable} onClick={()=>{clearDrag();onApply(exportVideoTrim(draftRef.current,bounds));close();}} data-testid="video-trim-apply"><Check/>자르기 적용</Button></div></div>
   </section>;
 }

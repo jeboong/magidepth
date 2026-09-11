@@ -1,11 +1,16 @@
-.video-trim-collapsed{display:flex;justify-content:flex-end;padding:6px 0 8px}
+.video-trim-collapsed{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;padding:6px 0 8px}
+.video-trim-collapsed[data-applied]{justify-content:space-between;margin-top:8px;border-top:1px solid hsl(var(--primary) / .2);padding-top:10px}
+.video-trim-applied{display:flex;align-items:center;gap:7px;color:hsl(var(--primary));font-size:11px;font-weight:600;min-width:0}
+.video-trim-applied>svg{flex-shrink:0}.video-trim-applied small{display:block;margin-top:3px;font-size:9px;font-weight:400;color:hsl(var(--muted-foreground));font-variant-numeric:tabular-nums;line-height:1.5}
+.video-trim-collapsed-actions{display:flex;align-items:center;gap:3px;margin-left:auto}
+.timeline[data-trimmed] .timeline-ticks i.major{background:hsl(var(--primary) / .6)}
 .preview-panel>.timeline{flex-shrink:0}
 .preview-panel:has(.video-trim-collapsed)>.preview-stage{min-height:180px}
 /* Let the existing editor column scroll, never clip the Apply/Cancel row. */
 .preview-panel:has([data-video-trim-editor]){flex:0 0 auto;min-height:0;max-height:none}
 .preview-panel:has([data-video-trim-editor])>.preview-stage{flex:0 0 clamp(180px,24vh,300px);min-height:180px}
-.video-trim-collapsed>button{height:28px;font-size:11px;padding:0 10px}
-.video-trim-collapsed>button svg{width:12px;height:12px}
+.video-trim-collapsed-actions>button{height:28px;font-size:11px;padding:0 10px}
+.video-trim-collapsed-actions>button svg{width:12px;height:12px}
 .video-trim-editor{margin:11px 0 10px;padding:14px;border:1px solid hsl(var(--border));border-radius:12px;background:hsl(var(--background));color:hsl(var(--foreground));animation:video-trim-arrive .18s ease-out}
 .video-trim-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:11px}
 .video-trim-heading>span{display:flex;align-items:center;gap:6px;font-weight:600}
